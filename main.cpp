@@ -53,7 +53,7 @@
 
 // #include "definitions.h"
 
-#define N 100//1100
+#define N 20//1100
 #define M 128
 #define B 10
 
@@ -65,7 +65,7 @@
 #define MEM_IN_ENCLAVE 5
 #define BLOCK_DATA_SIZE 128
 #define PADDING -1
-#define BUCKET_SIZE 30//256
+#define BUCKET_SIZE 6//256
 #define DUMMY 0xffffffff
 // #define DUMMY 0x00000000
 #define NULLCHAR '\0'
@@ -250,7 +250,7 @@ int main(int argc, char **argv) {
   arrayAddr[0] = a;
   paddedSize = N;
   init();
-  
+  /*
   std::cout << "=======Test=======\n";
   print(0);
   print(1);
@@ -262,8 +262,7 @@ int main(int argc, char **argv) {
   a[3] = -1;
   memcpy(addr + 2, a, 2 * sizeof(Bucket_x));
   print(1);
-  std::cout << "=======Test=======\n";
-  
+  std::cout << "=======Test=======\n";*/
   
   std::cout << "=======InitialA=======\n";
   print(0);
@@ -301,14 +300,20 @@ void OcallReadBlock(int index, int* buffer, size_t blockSize, int structureId) {
   memcpy(buffer, arrayAddr[structureId] + index, blockSize * structureSize[structureId]);
 }
 
+// index: 数据类型为int时的offset，字节数
 void OcallWriteBlock(int index, int* buffer, size_t blockSize, int structureId) {
   if (blockSize == 0) {
     //printf("Unknown data size\n");
     return;
-  }
-  
+  }/*
+  if (typeid(structureId) == typeid(int*)) {
+    memcpy(arrayAddr[structureId] + index, buffer, blockSize * structureSize[structureId]);
+  } else if (typeid(structureId) == typeid(Bucket_x*)) {
+    Bucket_x *addr = (Bucket_x*)arrayAddr[structureId];
+    memcpy(addr + index, buffer, blockSize * structureSize[structureId]);
+  }*/
   memcpy(arrayAddr[structureId] + index, buffer, blockSize * structureSize[structureId]);
-  // memcpy(&(arrayAddr[structureId][index]), buffer, blockSize * structureSize[structureId]);
+  // memcpy(&(arrayAddr[structureId][index]), buffer, blockSize * structureSizfine[structureId]);
 }
 
 void opOneLinearScanBlock(int index, int* block, size_t blockSize, int structureId, int write) {
@@ -438,13 +443,16 @@ int callSort(int sortId, int structureId) {
 void padWithDummy(int structureId, int start, int realNum) {
   //int blockSize = structureSize[structureId];
   int len = BUCKET_SIZE - realNum;
+  if (len <= 0) {
+    return ;
+  }
   int *junk = (int*)malloc(len * sizeof(Bucket_x));
   // memset(junk, 0xff, blockSize * len);
   for (int i = 0; i < len * 2; ++i) {
     junk[i] = -1;
   }
   
-  opOneLinearScanBlock(1 * (start + realNum) + 1, (int*)junk, (size_t)len/2, structureId, 1);
+  opOneLinearScanBlock(1 * (start + realNum) + 1, (int*)junk, (len)/2, structureId, 1);
   free(junk);
 }
 
@@ -644,18 +652,18 @@ void bucketSort(int inputStructureId, int bucketId, int size, int dataStart) {
 // size = #inputs real size
 int bucketOSort(int structureId, int size) {
   int bucketNum = smallestPowerOfTwoLargerThan(ceil(2.0 * size / BUCKET_SIZE));
+  paddedSize = bucketNum * BUCKET_SIZE;
   std::vector<int> bucketAddr1(bucketNum, -1);
   std::vector<int> bucketAddr2(bucketNum, -1);
   std::vector<int> numRows1(bucketNum, 0);
   std::vector<int> numRows2(bucketNum, 0);
   
   int ranBinAssignIters = log2(bucketNum) - 1;
-  int elementsPerBucket = (int)floor(size / bucketNum);
-  int reminder = size - elementsPerBucket * bucketNum;
-  
-  std::vector<int> bucketElem(bucketNum);
+  // int elementsPerBucket = (int)floor(size / bucketNum);
+  // int reminder = size - elementsPerBucket * bucketNum;
+  // std::vector<int> bucketElem(bucketNum);
   for (int i = 0; i < bucketNum; ++i) {
-    bucketElem[i] = elementsPerBucket + (i < reminder ? 1 : 0);
+    // bucketElem[i] = elementsPerBucket + (i < reminder ? 1 : 0);
     // bucketAddr: #elem in each bucket
     bucketAddr1[i] = i * BUCKET_SIZE;
     bucketAddr2[i] = i * BUCKET_SIZE;
@@ -671,14 +679,20 @@ int bucketOSort(int structureId, int size) {
   // read input & generate randomKey, write to designed bucket
   for (int i = 0; i < size; i += BLOCK_DATA_SIZE) {
     // TODO: 973 later x become all 0
-    opOneLinearScanBlock(i, inputTrustMemory, (size_t)std::min(BLOCK_DATA_SIZE, size - i), structureId - 1, 0);
+    opOneLinearScanBlock(i, inputTrustMemory, std::min(BLOCK_DATA_SIZE, size - i), structureId - 1, 0);
     int randomKey;
     for (int j = 0; j < std::min(BLOCK_DATA_SIZE, size - i); ++j) {
       randomKey = rand() % bucketNum;
       trustedMemory[j].x = inputTrustMemory[j];
       trustedMemory[j].key = randomKey;
       // TODO: improve
-      opOneLinearScanBlock(bucketAddr1[(i + j) % bucketNum] + numRows1[(i + j) % bucketNum], (int*)(&trustedMemory[j]), (size_t)1, structureId, 1);
+      int offset = bucketAddr1[(i + j) % bucketNum] + numRows1[(i + j) % bucketNum];
+      opOneLinearScanBlock(offset * 2, (int*)(&trustedMemory[j]), (size_t)1, structureId, 1);
+      std::cout<<"Assign each elem: i, j " <<i<<" " <<j<<" " << trustedMemory[j].x << " " << trustedMemory[j].key<<std::endl;
+      std::cout<<"paddedSize, BUCKET_SIZE, BUCKET_NUM"<<paddedSize<<" "<<BUCKET_SIZE<<" "<<bucketNum<<std::endl;
+      std::cout << arrayAddr[structureId] << arrayAddr[structureId] + 1 <<std::endl;
+      paddedSize = bucketNum * BUCKET_SIZE;
+      print(1);
       //Bucket_x test;
       //opOneLinearScanBlock(bucketAddr1[(i + j) % bucketNum] + numRows1[(i + j) % bucketNum], (int*)(&test), (size_t)1, structureId, 0);
       numRows1[(i + j) % bucketNum] ++;
@@ -701,6 +715,7 @@ int bucketOSort(int structureId, int size) {
     std::cout << "=======Index=======\n";
     std::cout << i <<" "<<"start index:"<< BUCKET_SIZE - numRows1[i]<<std::endl;
     std::cout << "size1: "<<(BUCKET_SIZE-numRows1[i])*sizeof(Bucket_x)<<std::endl;
+    std::cout << "len: " << BUCKET_SIZE - numRows1[i] << std::endl;
     padWithDummy(structureId, bucketAddr1[i], numRows1[i]);
     print(structureId);
     std::cout << "=======Index=======\n";
@@ -813,15 +828,18 @@ void print() {
   printf("\n");
 }
 
+// Judge by structure size
 void print(int structureId) {
   int i;
   for (i = 0; i < paddedSize; i++) {
-    if(typeid(arrayAddr[structureId]) == typeid(int*)) {
+    if(structureSize[structureId] == 4) {
+      // int
       int *addr = (int*)arrayAddr[structureId];
       printf("%d ", addr[i]);
-    } else if (typeid(arrayAddr[structureId]) == typeid(Bucket_x*)) {
+    } else if (structureSize[structureId] == 8) {
+      //Bucket
       Bucket_x *addr = (Bucket_x*)arrayAddr[structureId];
-      printf("%d ", addr[i].x);
+      printf("(%d, %d), ", addr[i].x, addr[i].key);
     }
   }
   printf("\n");
