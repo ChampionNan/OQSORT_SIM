@@ -251,6 +251,19 @@ int main(int argc, char **argv) {
   paddedSize = N;
   init();
   
+  std::cout << "=======Test=======\n";
+  print(0);
+  print(1);
+  int *addr = arrayAddr[1];
+  int *a = (int*)malloc(sizeof(Bucket_x) * 2);
+  a[0] = -1;
+  a[1] = -1;
+  a[2] = -1;
+  a[3] = -1;
+  memcpy(addr + 2, a, 2 * sizeof(Bucket_x));
+  print(1);
+  std::cout << "=======Test=======\n";
+  
   
   std::cout << "=======InitialA=======\n";
   print(0);
@@ -425,14 +438,13 @@ int callSort(int sortId, int structureId) {
 void padWithDummy(int structureId, int start, int realNum) {
   //int blockSize = structureSize[structureId];
   int len = BUCKET_SIZE - realNum;
-  Bucket_x *junk = (Bucket_x*)malloc(len * sizeof(Bucket_x));
+  int *junk = (int*)malloc(len * sizeof(Bucket_x));
   // memset(junk, 0xff, blockSize * len);
-  for (int i = 0; i < len; ++i) {
-    junk[i].key = -1;
-    junk[i].x = -1;
+  for (int i = 0; i < len * 2; ++i) {
+    junk[i] = -1;
   }
   
-  opOneLinearScanBlock(start + realNum + 1, (int*)junk, (size_t)len, structureId, 1);
+  opOneLinearScanBlock(1 * (start + realNum) + 1, (int*)junk, (size_t)len/2, structureId, 1);
   free(junk);
 }
 
