@@ -50,6 +50,7 @@
 #include <vector>
 #include <cstdlib>
 #include <assert.h>
+#include <bitset>
 
 // #include "definitions.h"
 
@@ -96,8 +97,8 @@ int callSort(int sortId, int structureId);
 
 void padWithDummy(int structureId, int start, int realNum);
 bool isTargetBitOne(int randomKey, int iter);
-void mergeSplitHelper(Bucket_x *inputBuffer, int inputBufferLen, std::vector<int> numRows2, int outputId0, int outputId1, int iter, std::vector<int> bucketAddr, int outputStructureId);
-void mergeSplit(int inputStructureId, int outputStructureId, int inputId0, int inputId1, int outputId0, int outputId1, std::vector<int> bucketAddr1, std::vector<int> bucketAddr2, std::vector<int> numRows1, std::vector<int> numRows2, int iter);
+void mergeSplitHelper(Bucket_x *inputBuffer, int inputBufferLen, std::vector<int> &numRows2, int outputId0, int outputId1, int iter, std::vector<int> bucketAddr, int outputStructureId);
+void mergeSplit(int inputStructureId, int outputStructureId, int inputId0, int inputId1, int outputId0, int outputId1, std::vector<int> bucketAddr1, std::vector<int> bucketAddr2, std::vector<int> &numRows1, std::vector<int> &numRows2, int iter);
 void kWayMergeSort(int inputStructureId, int outputStructureId, std::vector<int> bucketSize, std::vector<int> bucketAddr);
 void swapRow(Bucket_x *a, Bucket_x *b);
 bool cmpHelper(Bucket_x *a, Bucket_x *b);
@@ -452,7 +453,7 @@ void padWithDummy(int structureId, int start, int realNum) {
     junk[i] = -1;
   }
   
-  opOneLinearScanBlock(1 * (start + realNum) + 1, (int*)junk, (len)/2, structureId, 1);
+  opOneLinearScanBlock(2 * (start + realNum), (int*)junk, len, structureId, 1);
   free(junk);
 }
 
@@ -475,12 +476,12 @@ void moveDummy(int structureId, int start) {
 
 bool isTargetBitOne(int randomKey, int iter) {
   assert(iter >= 1);
-  return (randomKey & (0x01 << (32 - iter))) == 0 ? false : true;
+  return (randomKey & (0x01 << (iter - 1))) == 0 ? false : true;
 }
 
-void mergeSplitHelper(Bucket_x *inputBuffer, int inputBufferLen, std::vector<int> numRows2, int outputId0, int outputId1, int iter, std::vector<int> bucketAddr, int outputStructureId) {
+void mergeSplitHelper(Bucket_x *inputBuffer, int inputBufferLen, std::vector<int> &numRows2, int outputId0, int outputId1, int iter, std::vector<int> bucketAddr, int outputStructureId) {
   // write back standard
-  int batchSize = 128; // 8192
+  int batchSize = 1; // 8192
   Bucket_x *buf0 = (Bucket_x*)malloc(batchSize * sizeof(Bucket_x));
   Bucket_x *buf1 = (Bucket_x*)malloc(batchSize * sizeof(Bucket_x));
   int counter0 = 0, counter1 = 0;
@@ -489,12 +490,13 @@ void mergeSplitHelper(Bucket_x *inputBuffer, int inputBufferLen, std::vector<int
   for (int i = 0; i < inputBufferLen; ++i) {
     if ((inputBuffer[i].key != DUMMY) && (inputBuffer[i].x != DUMMY)) {
       randomKey = inputBuffer[i].key;
+      
       if (isTargetBitOne(randomKey, iter + 1)) {
         buf1[counter1 % batchSize] = inputBuffer[i];
         counter1 ++;
         if (counter1 % batchSize == 0) {
-          int start = (counter1 / batchSize - 1) * batchSize;
-          opOneLinearScanBlock(bucketAddr[outputId1] + start, (int*)buf1, (size_t)batchSize, outputStructureId, 1);
+          // int start = (counter1 / batchSize - 1) * batchSize;
+          opOneLinearScanBlock(2 * (bucketAddr[outputId1] +  numRows2[outputId1]), (int*)buf1, (size_t)batchSize, outputStructureId, 1);
           numRows2[outputId1] += batchSize;
           memset(buf1, NULLCHAR, batchSize * sizeof(Bucket_x));
         }
@@ -502,8 +504,8 @@ void mergeSplitHelper(Bucket_x *inputBuffer, int inputBufferLen, std::vector<int
         buf0[counter0 % batchSize] = inputBuffer[i];
         counter0 ++;
         if (counter0 % batchSize == 0) {
-          int start = (counter0 / batchSize - 1) * batchSize;
-          opOneLinearScanBlock(bucketAddr[outputId0] + start, (int*)buf0, (size_t)batchSize, outputStructureId, 1);
+          // int start = (counter0 / batchSize - 1) * batchSize;
+          opOneLinearScanBlock(2 * (bucketAddr[outputId0] + numRows2[outputId0]), (int*)buf0, (size_t)batchSize, outputStructureId, 1);
           numRows2[outputId0] += batchSize;
           memset(buf0, NULLCHAR, batchSize * sizeof(Bucket_x));
         }
@@ -511,11 +513,11 @@ void mergeSplitHelper(Bucket_x *inputBuffer, int inputBufferLen, std::vector<int
     }
   }
   
-  int start = (counter1 / batchSize - 1) * batchSize;
-  opOneLinearScanBlock(bucketAddr[outputId1] + start, (int*)buf1, (size_t)(counter1 % batchSize), outputStructureId, 1);
+  // int start = (counter1 / batchSize - 1) * batchSize;
+  opOneLinearScanBlock(2 * (bucketAddr[outputId1] + numRows2[outputId1]), (int*)buf1, (size_t)(counter1 % batchSize), outputStructureId, 1);
   numRows2[outputId1] += counter1 % batchSize;
-  start = (counter0 / batchSize - 1) * batchSize;
-  opOneLinearScanBlock(bucketAddr[outputId0] + start, (int*)buf0, (size_t)(counter0 % batchSize), outputStructureId, 1);
+  // start = (counter0 / batchSize - 1) * batchSize;
+  opOneLinearScanBlock(2 * (bucketAddr[outputId0] + numRows2[outputId0]), (int*)buf0, (size_t)(counter0 % batchSize), outputStructureId, 1);
   numRows2[outputId0] += counter0 % batchSize;
   
   free(buf0);
@@ -524,23 +526,28 @@ void mergeSplitHelper(Bucket_x *inputBuffer, int inputBufferLen, std::vector<int
 
 // inputId: start index for inputStructureId
 // numRow1: input bucket length, numRow2: output bucket length
-void mergeSplit(int inputStructureId, int outputStructureId, int inputId0, int inputId1, int outputId0, int outputId1, std::vector<int> bucketAddr1, std::vector<int> bucketAddr2, std::vector<int> numRows1, std::vector<int> numRows2, int iter) {
+void mergeSplit(int inputStructureId, int outputStructureId, int inputId0, int inputId1, int outputId0, int outputId1, std::vector<int> bucketAddr1, std::vector<int> bucketAddr2, std::vector<int> &numRows1, std::vector<int> &numRows2, int iter) {
   Bucket_x *inputBuffer = (Bucket_x*)malloc(sizeof(Bucket_x) * BUCKET_SIZE);
   // BLOCK#0
-  opOneLinearScanBlock(bucketAddr1[inputId0], (int*)inputBuffer, BUCKET_SIZE, inputStructureId, 0);
+  opOneLinearScanBlock(2 * bucketAddr1[inputId0], (int*)inputBuffer, BUCKET_SIZE, inputStructureId, 0);
   mergeSplitHelper(inputBuffer, numRows1[inputId0], numRows2, outputId0, outputId1, iter, bucketAddr2, outputStructureId);
   if (numRows2[outputId0] > BUCKET_SIZE || numRows2[outputId1] > BUCKET_SIZE) {
     DBGprint("overflow error during merge split!\n");
   }
   
   // BLOCK#1
-  opOneLinearScanBlock(bucketAddr1[inputId1], (int*)inputBuffer, BUCKET_SIZE, inputStructureId, 0);
+  opOneLinearScanBlock(2 * bucketAddr1[inputId1], (int*)inputBuffer, BUCKET_SIZE, inputStructureId, 0);
   mergeSplitHelper(inputBuffer, numRows1[inputId1], numRows2, outputId0, outputId1, iter, bucketAddr2, outputStructureId);
+  
   if (numRows2[outputId0] > BUCKET_SIZE || numRows2[outputId1] > BUCKET_SIZE) {
     DBGprint("overflow error during merge split!\n");
   }
+  
   padWithDummy(outputStructureId, bucketAddr2[outputId1], numRows2[outputId1]);
   padWithDummy(outputStructureId, bucketAddr2[outputId0], numRows2[outputId0]);
+  std::cout<<"=====MergeDUMMY=====\n";
+  print(outputStructureId);
+  std::cout<<"=====MergeDUMMY=====\n";
   
   free(inputBuffer);
 }
@@ -682,19 +689,14 @@ int bucketOSort(int structureId, int size) {
     opOneLinearScanBlock(i, inputTrustMemory, std::min(BLOCK_DATA_SIZE, size - i), structureId - 1, 0);
     int randomKey;
     for (int j = 0; j < std::min(BLOCK_DATA_SIZE, size - i); ++j) {
-      randomKey = rand() % bucketNum;
+      randomKey = rand();
       trustedMemory[j].x = inputTrustMemory[j];
       trustedMemory[j].key = randomKey;
       // TODO: improve
       int offset = bucketAddr1[(i + j) % bucketNum] + numRows1[(i + j) % bucketNum];
       opOneLinearScanBlock(offset * 2, (int*)(&trustedMemory[j]), (size_t)1, structureId, 1);
-      std::cout<<"Assign each elem: i, j " <<i<<" " <<j<<" " << trustedMemory[j].x << " " << trustedMemory[j].key<<std::endl;
-      std::cout<<"paddedSize, BUCKET_SIZE, BUCKET_NUM"<<paddedSize<<" "<<BUCKET_SIZE<<" "<<bucketNum<<std::endl;
-      std::cout << arrayAddr[structureId] << arrayAddr[structureId] + 1 <<std::endl;
+      
       paddedSize = bucketNum * BUCKET_SIZE;
-      print(1);
-      //Bucket_x test;
-      //opOneLinearScanBlock(bucketAddr1[(i + j) % bucketNum] + numRows1[(i + j) % bucketNum], (int*)(&test), (size_t)1, structureId, 0);
       numRows1[(i + j) % bucketNum] ++;
     }
     total += std::min(BLOCK_DATA_SIZE, size - i);
@@ -702,23 +704,10 @@ int bucketOSort(int structureId, int size) {
   free(trustedMemory);
   free(inputTrustMemory);
   
-  std::cout << "=======Initial0=======\n";
-  std::cout << total << std::endl;
-  paddedSize = bucketNum * BUCKET_SIZE;
-  std::cout<<"paddedSize: "<<paddedSize<<std::endl;
-  print(structureId);
-  std::cout<<sizeof(int)<<" "<<sizeof(Bucket_x)<<std::endl;
-  std::cout << "=======Initial0=======\n";
-  
   for (int i = 0; i < bucketNum; ++i) {
     DBGprint("currently bucket %d has %d records/%d", i, numRows1[i], BUCKET_SIZE);
-    std::cout << "=======Index=======\n";
-    std::cout << i <<" "<<"start index:"<< BUCKET_SIZE - numRows1[i]<<std::endl;
-    std::cout << "size1: "<<(BUCKET_SIZE-numRows1[i])*sizeof(Bucket_x)<<std::endl;
-    std::cout << "len: " << BUCKET_SIZE - numRows1[i] << std::endl;
     padWithDummy(structureId, bucketAddr1[i], numRows1[i]);
-    print(structureId);
-    std::cout << "=======Index=======\n";
+    
   }
   
   std::cout << "=======Initial=======\n";
