@@ -54,7 +54,7 @@
 
 // #include "definitions.h"
 
-#define N 20//1100
+#define N 2000//1100
 #define M 128
 #define B 10
 
@@ -66,7 +66,7 @@
 #define MEM_IN_ENCLAVE 5
 #define BLOCK_DATA_SIZE 128
 #define PADDING -1
-#define BUCKET_SIZE 6//256
+#define BUCKET_SIZE 60//256
 #define DUMMY 0xffffffff
 // #define DUMMY 0x00000000
 #define NULLCHAR '\0'
@@ -99,7 +99,7 @@ void padWithDummy(int structureId, int start, int realNum);
 bool isTargetBitOne(int randomKey, int iter);
 void mergeSplitHelper(Bucket_x *inputBuffer, int inputBufferLen, std::vector<int> &numRows2, int outputId0, int outputId1, int iter, std::vector<int> bucketAddr, int outputStructureId);
 void mergeSplit(int inputStructureId, int outputStructureId, int inputId0, int inputId1, int outputId0, int outputId1, std::vector<int> bucketAddr1, std::vector<int> bucketAddr2, std::vector<int> &numRows1, std::vector<int> &numRows2, int iter);
-void kWayMergeSort(int inputStructureId, int outputStructureId, std::vector<int> bucketSize, std::vector<int> bucketAddr);
+void kWayMergeSort(int inputStructureId, int outputStructureId, std::vector<int> &numRows1, std::vector<int> &numRows2, std::vector<int> bucketAddr);
 void swapRow(Bucket_x *a, Bucket_x *b);
 bool cmpHelper(Bucket_x *a, Bucket_x *b);
 int partition(Bucket_x *arr, int low, int high);
@@ -139,11 +139,11 @@ class Heap {
   int batchSize;
   
 public:
-  Heap(HeapNode *a, int size, int batchSize) {
+  Heap(HeapNode *a, int size, int bsize) {
     heapSize = size;
     harr = a;
     int i = (heapSize - 1) / 2;
-    batchSize = batchSize;
+    batchSize = bsize;
     while (i >= 0) {
       Heapify(i);
       i --;
@@ -251,23 +251,9 @@ int main(int argc, char **argv) {
   arrayAddr[0] = a;
   paddedSize = N;
   init();
-  /*
-  std::cout << "=======Test=======\n";
-  print(0);
-  print(1);
-  int *addr = arrayAddr[1];
-  int *a = (int*)malloc(sizeof(Bucket_x) * 2);
-  a[0] = -1;
-  a[1] = -1;
-  a[2] = -1;
-  a[3] = -1;
-  memcpy(addr + 2, a, 2 * sizeof(Bucket_x));
-  print(1);
-  std::cout << "=======Test=======\n";*/
   
   std::cout << "=======InitialA=======\n";
   print(0);
-  std::cout<<std::endl;
   std::cout << "=======InitialA=======\n";
   int resId = callSort(2, 1);
   paddedSize = N;
@@ -545,16 +531,13 @@ void mergeSplit(int inputStructureId, int outputStructureId, int inputId0, int i
   
   padWithDummy(outputStructureId, bucketAddr2[outputId1], numRows2[outputId1]);
   padWithDummy(outputStructureId, bucketAddr2[outputId0], numRows2[outputId0]);
-  std::cout<<"=====MergeDUMMY=====\n";
-  print(outputStructureId);
-  std::cout<<"=====MergeDUMMY=====\n";
   
   free(inputBuffer);
 }
 
-void kWayMergeSort(int inputStructureId, int outputStructureId, std::vector<int> numRows1, std::vector<int> numRows2, std::vector<int> bucketAddr) {
-  int mergeSortBatchSize = 64; // 256
-  int writeBufferSize = 128; // 8192
+void kWayMergeSort(int inputStructureId, int outputStructureId, std::vector<int> &numRows1, std::vector<int> &numRows2, std::vector<int> bucketAddr) {
+  int mergeSortBatchSize = 128; // 256
+  int writeBufferSize = 256; // 8192
   int numWays = (int)numRows1.size();
   HeapNode inputHeapNodeArr[numWays];
   int totalCounter = 0;
@@ -566,7 +549,7 @@ void kWayMergeSort(int inputStructureId, int outputStructureId, std::vector<int>
     node.data = (Bucket_x*)malloc(mergeSortBatchSize * sizeof(Bucket_x));
     node.bucketIdx = i;
     node.elemIdx = 0;
-    opOneLinearScanBlock(readBucketAddr[i], (int*)node.data, (size_t)std::min(mergeSortBatchSize, numRows1[i]), inputStructureId, 0);
+    opOneLinearScanBlock(2 * readBucketAddr[i], (int*)node.data, (size_t)std::min(mergeSortBatchSize, numRows1[i]), inputStructureId, 0);
     inputHeapNodeArr[i] = node;
     // Update data count
     readBucketAddr[i] += std::min(mergeSortBatchSize, numRows1[i]);
@@ -585,7 +568,7 @@ void kWayMergeSort(int inputStructureId, int outputStructureId, std::vector<int>
     temp->elemIdx ++;
     
     if (writeBufferCounter == writeBufferSize) {
-      opOneLinearScanBlock(writeBucketAddr, (int*)temp, (size_t)writeBufferSize, outputStructureId, 1);
+      opOneLinearScanBlock(2 * writeBucketAddr, (int*)writeBuffer, (size_t)writeBufferSize, outputStructureId, 1);
       writeBucketAddr += writeBufferSize;
       numRows2[temp->bucketIdx] += writeBufferSize;
       writeBufferCounter = 0;
@@ -593,7 +576,9 @@ void kWayMergeSort(int inputStructureId, int outputStructureId, std::vector<int>
     
     // re-get bucketIdx mergeSortBatchSize data, juct compare certain index data
     if (temp->elemIdx < numRows1[temp->bucketIdx] && (temp->elemIdx % mergeSortBatchSize) == 0) {
-      opOneLinearScanBlock(readBucketAddr[temp->bucketIdx], (int*)temp->data, (size_t)std::min(mergeSortBatchSize, numRows1[temp->bucketIdx]-temp->elemIdx), inputStructureId, 0);
+      
+      opOneLinearScanBlock(2 * readBucketAddr[temp->bucketIdx], (int*)(temp->data), (size_t)std::min(mergeSortBatchSize, numRows1[temp->bucketIdx]-temp->elemIdx), inputStructureId, 0);
+      
       readBucketAddr[temp->bucketIdx] += std::min(mergeSortBatchSize, numRows1[temp->bucketIdx]-temp->elemIdx);
       heap.Heapify(0);
       // one bucket data is empty
@@ -606,7 +591,7 @@ void kWayMergeSort(int inputStructureId, int outputStructureId, std::vector<int>
       heap.Heapify(0);
     }
   }
-  opOneLinearScanBlock(writeBucketAddr, (int*)writeBuffer, (size_t)writeBufferCounter, outputStructureId, 1);
+  opOneLinearScanBlock(2 * writeBucketAddr, (int*)writeBuffer, (size_t)writeBufferCounter, outputStructureId, 1);
   numRows2[-1] += writeBufferCounter;
   free(writeBuffer);
 }
@@ -743,21 +728,6 @@ int bucketOSort(int structureId, int size) {
     }
     DBGprint("\n\n Finish random bin assignment iter%dth out of %d\n\n", i, ranBinAssignIters);
   }
-  // TODO: remove DUMMY (finished)
-  /*
-  for (int i = 0; i < bucketNum; ++i) {
-    if (ranBinAssignIters % 2) {
-      moveDummy(structureId, bucketAddr1[i]);
-      std::cout<<"After Move DUMMY"<<std::endl;
-      print(structureId);
-      std::cout<<"After Move DUMMY"<<std::endl;
-    } else {
-      moveDummy(structureId + 1, bucketAddr2[i]);
-      std::cout<<"After Move DUMMY"<<std::endl;
-      print(structureId + 1);
-      std::cout<<"After Move DUMMY"<<std::endl;
-    }
-  }*/
   
   int resultId = 0;
   if (ranBinAssignIters % 2 == 0) {
