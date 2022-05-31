@@ -650,9 +650,9 @@ void quickSort(Bucket_x *arr, int low, int high) {
 
 void bucketSort(int inputStructureId, int bucketId, int size, int dataStart) {
   Bucket_x *arr = (Bucket_x*)malloc(BUCKET_SIZE * sizeof(Bucket_x));
-  opOneLinearScanBlock(dataStart, (int*)arr, (size_t)size, inputStructureId, 0);
+  opOneLinearScanBlock(2 * dataStart, (int*)arr, (size_t)size, inputStructureId, 0);
   quickSort(arr, 0, size - 1);
-  opOneLinearScanBlock(dataStart, (int*)arr, (size_t)size, inputStructureId, 1);
+  opOneLinearScanBlock(2 * dataStart, (int*)arr, (size_t)size, inputStructureId, 1);
   free(arr);
 }
 
@@ -741,35 +741,46 @@ int bucketOSort(int structureId, int size) {
       }
       DBGprint("after %dth merge split, we have %d tuples\n", i, count);
     }
+    DBGprint("\n\n Finish random bin assignment iter%dth out of %d\n\n", i, ranBinAssignIters);
   }
   // TODO: remove DUMMY (finished)
+  /*
   for (int i = 0; i < bucketNum; ++i) {
     if (ranBinAssignIters % 2) {
       moveDummy(structureId, bucketAddr1[i]);
+      std::cout<<"After Move DUMMY"<<std::endl;
+      print(structureId);
+      std::cout<<"After Move DUMMY"<<std::endl;
     } else {
       moveDummy(structureId + 1, bucketAddr2[i]);
+      std::cout<<"After Move DUMMY"<<std::endl;
+      print(structureId + 1);
+      std::cout<<"After Move DUMMY"<<std::endl;
     }
-  }
+  }*/
+  
   int resultId = 0;
-  if (ranBinAssignIters % 2 == 1) {
+  if (ranBinAssignIters % 2 == 0) {
     for (int i = 0; i < bucketNum; ++i) {
       bucketSort(structureId, i, numRows1[i], bucketAddr1[i]);
     }
+    std::cout<<"=====After bucketsort1=====\n";
+    print(structureId);
+    std::cout<<"=====After bucketsort1=====\n";
     kWayMergeSort(structureId, structureId + 1, numRows1, numRows2, bucketAddr1);
     resultId = structureId + 1;
   } else {
     for (int i = 0; i < bucketNum; ++i) {
       bucketSort(structureId + 1, i, numRows2[i], bucketAddr2[i]);
     }
+    std::cout<<"=====After bucketsort0=====\n";
+    print(structureId + 1);
+    std::cout<<"=====After bucketsort0=====\n";
     kWayMergeSort(structureId + 1, structureId, numRows2, numRows1, bucketAddr2);
     resultId = structureId;
   }
   return resultId;
 }
-
-
-
-
 
 
 
