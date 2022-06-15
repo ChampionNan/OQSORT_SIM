@@ -51,11 +51,12 @@
 #include <cstdlib>
 #include <assert.h>
 #include <bitset>
+#include <random>
 
 // #include "definitions.h"
 
-#define N 2000//1100
-#define M 128
+#define N 2000000//1100
+#define M 128 // M != B or OQSORT comes error
 #define B 10
 
 #define alpha 0.1
@@ -66,7 +67,7 @@
 #define MEM_IN_ENCLAVE 5
 #define BLOCK_DATA_SIZE 128
 #define PADDING -1
-#define BUCKET_SIZE 60//256
+#define BUCKET_SIZE 6000//256
 #define DUMMY 0xffffffff
 // #define DUMMY 0x00000000
 #define NULLCHAR '\0'
@@ -101,11 +102,18 @@ void mergeSplitHelper(Bucket_x *inputBuffer, int inputBufferLen, std::vector<int
 void mergeSplit(int inputStructureId, int outputStructureId, int inputId0, int inputId1, int outputId0, int outputId1, std::vector<int> bucketAddr1, std::vector<int> bucketAddr2, std::vector<int> &numRows1, std::vector<int> &numRows2, int iter);
 void kWayMergeSort(int inputStructureId, int outputStructureId, std::vector<int> &numRows1, std::vector<int> &numRows2, std::vector<int> bucketAddr);
 void swapRow(Bucket_x *a, Bucket_x *b);
+void swapRow(int *a, int *b);
 bool cmpHelper(Bucket_x *a, Bucket_x *b);
 int partition(Bucket_x *arr, int low, int high);
 void quickSort(Bucket_x *arr, int low, int high);
+void quickSort(int *arr, int low, int high);
 void bucketSort(int inputStructureId, int bucketId, int size, int dataStart);
 int bucketOSort(int structureId, int size);
+int* SampleWithOutReplace(int structureId);
+int PivotsSelection(int inStructureId, int samplesId, int pivotsId);
+int DataPartition(int inStructureId, int outStructureId, double *quanP, int P, int levelSize);
+void ObliviousSort(int inStructureId, int outStructureId);
+int moveDummy(int *a, int size);
 
 
 // Input & Output Array
@@ -208,6 +216,14 @@ public:
   
 };
 
+// Oblivious Bucket Sort
+
+#define DBGprint(...) { \
+  fprintf(stderr, "%s: Line %d:\t", __FILE__, __LINE__); \
+  fprintf(stderr, __VA_ARGS__); \
+  fprintf(stderr, "\n"); \
+}
+
 
 /** the main program **/
 int main(int argc, char **argv) {
@@ -251,10 +267,10 @@ int main(int argc, char **argv) {
   arrayAddr[0] = a;
   paddedSize = N;
   init();
-  
+  /*
   std::cout << "=======InitialA=======\n";
   print(0);
-  std::cout << "=======InitialA=======\n";
+  std::cout << "=======InitialA=======\n";*/
   int resId = callSort(2, 1);
   paddedSize = N;
   test(resId);
@@ -276,6 +292,20 @@ int smallestPowerOfTwoLargerThan(int n) {
     k = k << 1;
   }
   return k;
+}
+
+// TODO: Set this function as OCALL
+void freeAllocate(int structureId, int size) {
+  // 1. Free arrayAddr[structureId]
+  if (arrayAddr[structureId]) {
+    free(arrayAddr[structureId]);
+  }
+  // 2. malloc new asked size (allocated in outside)
+  int *addr = (int*)malloc(size * sizeof(int));
+  memset(addr, DUMMY, size * sizeof(int));
+  // 3. assign malloc address to arrayAddr
+  arrayAddr[structureId] = addr;
+  return ;
 }
 
 void OcallReadBlock(int index, int* buffer, size_t blockSize, int structureId) {
@@ -312,6 +342,296 @@ void opOneLinearScanBlock(int index, int* block, size_t blockSize, int structure
   return;
 }
 
+int SampleWithOutReplace(int inStructureId, int samplesId) {
+  int n_prime = (int)ceil(alpha * N);
+  int alphaM2 = (int)ceil(2 * alpha * M);
+  int boundary = (int)ceil(N/M);
+  int Msize;
+  int realNum = 0; // #pivots
+  int writeBacksize = 0; // #y's write back size
+  int writeBackstart = 0;
+  int readStart = 0;
+  int *y = (int*)malloc(M * sizeof(int));
+  int *trustedMemory = (int*)malloc(M * sizeof(int));
+  
+  for (int i = 0; i < boundary; i++) {
+    Msize = std::min(M, N - i * M);
+    opOneLinearScanBlock(readStart, trustedMemory, Msize, inStructureId, 0);
+    readStart += Msize;
+    for (int j = 0; j < Msize; ++j) {
+      std::random_device rd;
+      std::mt19937_64 generator(rd());
+      double rate = alpha;
+      std::bernoulli_distribution b(rate);
+      if (b(generator)) {
+        n_prime --;
+      } else {
+        trustedMemory[j] = DUMMY;
+      }
+    }
+    realNum += moveDummy(trustedMemory, Msize);
+    
+    if (writeBacksize + alphaM2 >= M) {
+      opOneLinearScanBlock(writeBackstart, y, writeBacksize, samplesId, 1);
+      // only update here
+      writeBackstart += writeBacksize;
+      writeBacksize = 0;
+      memcpy(y, trustedMemory, alphaM2);
+    } else {
+      memcpy(y + writeBackstart, trustedMemory, alphaM2);
+      writeBacksize += alphaM2;
+    }
+  }
+  
+  free(trustedMemory);
+  free(y);
+  if (realNum < (int)(alpha * N)) {
+    return -1;
+  }
+  return realNum;
+}
+
+// TODO: at the end, free y & pivots
+// TODO: M has the same size with BLOCK_DATA_SIZE
+// TODO: dummy elements in the sampled should be placed at the end
+int PivotsSelection(int inStructureId, int samplesId, int pivotsId) {
+  int res = -1;
+  // If fail, repeat
+  while (res == -1) {
+    res = SampleWithOutReplace(inStructureId, samplesId);
+  }
+  // sort pivots using bitonic sort, we can use sort algorithm randomly here
+  int *row1 = (int*)malloc(BLOCK_DATA_SIZE * sizeof(int));
+  int *row2 = (int*)malloc(BLOCK_DATA_SIZE * sizeof(int));
+  bitonicSort(samplesId, 0, res, 0, row1, row1);
+  free(row1);
+  free(row2);
+  // int pSize = (int)ceil(N / M);
+  int *p = (int*)malloc(M * sizeof(int));
+  double j = alpha * M;
+  int k = 0;
+  // TODO: why still return *p if the pivots are stored in pivotsId
+  int totalK = 0; // #pivots
+  int end = (int)ceil(alpha * N / M);
+  int *trustedMemory = (int*)malloc(M * sizeof(int));
+  int writeBackstart = 0;
+  int readStart = 0;
+  
+  for (int i = 0; i < end; ++i) {
+    int Msize = std::min(M, (int)ceil(alpha * N) - i * M);
+    opOneLinearScanBlock(readStart, trustedMemory, Msize, samplesId, 0);
+    readStart += Msize;
+    while (j < M) {
+      int indexj = (int)floor(j);
+      if (k >= M) {
+        opOneLinearScanBlock(writeBackstart, p, M, pivotsId, 1);
+        writeBackstart += M;
+        totalK += M;
+        k -= M;
+      }
+      p[k++] = trustedMemory[indexj];
+      j += alpha * M;
+    }
+    j -= M;
+  }
+  // TODO: Left write back
+  opOneLinearScanBlock(writeBackstart, p, k, pivotsId, 1);
+  totalK += k;
+  free(trustedMemory);
+  return totalK; // p is not the full pivots
+}
+
+int upperBound(int *a, int size, int k) {
+  int start = 0;
+  int last = size;
+  while (start < last) {
+    int mid = start + (last - start) / 2;
+    if (a[mid] <= k) {
+      start = mid + 1;
+    } else {
+      last = mid;
+    }
+  }
+  return start;
+}
+
+
+// TODO: change memory to P with circular division (Finished)
+int DataPartition(int inStructureId, int outStructureId, double *quanP, int P, int levelSize) {
+  int M_prime = (int)ceil(M / (1 + 2 * beta));
+  int XiSize = (int)ceil(N * B / M_prime);
+  // 1. initial Xi
+  int mallocSize = P * XiSize;
+  freeAllocate(outStructureId, mallocSize);
+  // 2. for j
+  int blockSize;
+  int end = (int)ceil(N / M_prime);
+  int psecSize = (int)ceil(M / P);
+  int readStart = 0;
+  // Inidicate #elem in bucket(#bucket = P)
+  int *offset = (int*)malloc(P * sizeof(int));
+  memset(offset, 0, P * sizeof(int));
+  int *writeBackOffset = (int*)malloc(P * sizeof(int));
+  memset(writeBackOffset, 0, P * sizeof(int));
+  int *trustedMemory = (int*)malloc(M_prime * sizeof(int));
+  int *xiSec = (int*)malloc(psecSize * sizeof(int));
+  memset(xiSec, DUMMY, psecSize * sizeof(int));
+  int retFlag = 1;
+  // TODO: check fail condition: move more than M/P elements
+  for (int j = 0; j < end; ++j) {
+    int jstart = j * psecSize;
+    blockSize = std::min(M_prime, levelSize - j * M_prime);
+    opOneLinearScanBlock(readStart, trustedMemory, blockSize, inStructureId, 0);
+    readStart += blockSize;
+    for (int i = 0; i < P; ++i) {
+      int istart = i * XiSize;
+      for (int k = 0; k < blockSize; ++k) {
+        int x = trustedMemory[k];
+        if (i == 0 && x <= quanP[i]) {
+          if (offset[i] > psecSize) {
+            DBGprint("DataPartition Fail");
+            retFlag = 0;
+          }
+          xiSec[istart + jstart + offset[i]] = x;
+          offset[i] ++;
+        } else if ((i != (P - 1)) && (x > quanP[i]) && (x <= quanP[i + 1])){
+          if (offset[i + 1] > psecSize) {
+            DBGprint("DataPartition Fail");
+            retFlag = 0;
+          }
+          xiSec[istart + jstart + offset[i + 1]] = x;
+          offset[i + 1] ++;
+        } else if (i == (P - 1) && x > quanP[i]) {
+          if (offset[0] > psecSize) {
+            DBGprint("DataPartition Fail");
+            retFlag = 0;
+          }
+          xiSec[istart + jstart + offset[0]] = x;
+          offset[0] ++;
+        } else {
+          DBGprint("partion section error");
+          retFlag = 0;
+        }
+      } // end-k
+      // TODO: which size write back?
+      opOneLinearScanBlock(istart + writeBackOffset[i], xiSec, offset[i], outStructureId, 1);
+      writeBackOffset[i] += offset[i];
+      offset[i] = 0;
+      memset(xiSec, DUMMY, psecSize * sizeof(int));
+    } // end-i
+    
+  } // end-j
+  // TODO: Free data structure
+  free(offset);
+  free(writeBackOffset);
+  free(trustedMemory);
+  free(xiSec);
+  return retFlag;
+}
+
+double quantileCal(int *a, int size, double rate) {
+  assert(rate >= 0.0 && rate <= 1.0);
+  double id = (size - 1) * rate;
+  int lo = floor(id);
+  int hi = ceil(id);
+  int qs = a[lo];
+  double h = id - lo;
+  return (1.0 - h) * qs + h * a[hi];
+}
+
+// structureId=-1 -> use y in pivots selection use other sorting agorithm
+// TODO: 需要使用MEM_IN_ENCLAVE来做enclave memory的约束? how
+// TODO: 主要是用来限制oponelinear一次读取进来的数据大小
+int ObliviousSort(int inStructureId, int inSize, int sampleId, int pivotsId, int outStructureId) {
+  int *trustedMemory = NULL;
+  if (N <= M) {
+    trustedMemory = (int*)malloc(N);
+    // TODO: use sort algorithm
+    // TODO: Change blockSize to BLOCK_DATA_SIZE
+    opOneLinearScanBlock(0, trustedMemory, N, inStructureId, 0);
+    quickSort(trustedMemory, 0, N - 1);
+    opOneLinearScanBlock(0, trustedMemory, N, outStructureId, 1);
+    free(trustedMemory);
+    return 1;
+  }
+  // TODO: p is the address of pivots, which need to free
+  int numPivots = -1;
+  numPivots = PivotsSelection(inStructureId, sampleId, pivotsId);
+  // Fisher-Yates shuffle
+  // TODO: 这里是使用paddwithdummy还是shuffle一部分数据？
+  trustedMemory = (int*)malloc(2 * B * sizeof(int));
+  int iEnd = (int)ceil(N/B) - 2;
+  for (int i = 0; i <= iEnd; ++i) {
+    std::default_random_engine generator;
+    int right = (int)ceil(N/B);
+    std::uniform_int_distribution<int> distribution(i, right - 1);
+    int j = distribution(generator);
+    int jSize = B;
+    if (j == right - 1) {
+      jSize = N - (right - 1) * B;
+    }
+    opOneLinearScanBlock(i * B, trustedMemory, jSize, inStructureId, 0);
+    opOneLinearScanBlock(j * B, &trustedMemory[B], jSize, inStructureId, 0);
+    opOneLinearScanBlock(i * B, &trustedMemory[B], jSize, inStructureId, 1);
+    opOneLinearScanBlock(j * B, trustedMemory, jSize, inStructureId, 1);
+  }
+  // double M_prime = ceil(M / (1 + 2 * beta));
+  int r = (int)ceil(log(N / M) / log(numPivots / (1 + 2 * beta)));
+  int levelSize = 0;
+  // TODO: 这里使用inStructId和outStructId两个数组进行轮换，以实现r层数据的partition
+  // TODO: should pad with dummy
+  for (int i = 0; i < r; ++i) {
+    int jEnd = (int)ceil(pow(M/B, i));
+    int W = (int)((N/M)/jEnd);
+    int *p = (int*)malloc(W * sizeof(int));
+    double *quanP = (double*)malloc(sizeof(double) * jEnd);
+    for (int j = 0; j < jEnd; ++j) {
+      int wSize = std::min(W, numPivots - j * W);
+      opOneLinearScanBlock(j * W, p, wSize, pivotsId, 0);
+      // TODO: use i 的奇偶性来进行区分
+      quanP[j] = quantileCal(&p[j * W], wSize, M / B);
+    }
+    
+    int XiSize = (int)ceil(N * B * (1 + 2 * beta) / M);
+    levelSize = jEnd * XiSize; // use two part both ceiling
+    int flag = 0;
+    if (i % 2) {
+      while (!flag) {
+        flag = DataPartition(inStructureId, outStructureId, quanP, jEnd, levelSize);
+      }
+    } else {
+      while (!flag) {
+        flag = DataPartition(outStructureId, inStructureId, quanP, jEnd, levelSize);
+      }
+    }
+  }
+  int jEnd = (int)pow(M/B, r);
+  int blockSize = (int)ceil(M/B);
+  int totalReal = 0; // use for write back address
+  // TODO: previous pointed should be free
+  trustedMemory = (int*)malloc((int)ceil(M/B) * sizeof(int));
+  for (int j = 0; j < jEnd; ++j) {
+    int readSize = std::min(blockSize, levelSize - j * blockSize);
+    if (r % 2) {
+      opOneLinearScanBlock(j * blockSize, trustedMemory, readSize, outStructureId, 0);
+      int real = moveDummy(trustedMemory, readSize);
+      quickSort(trustedMemory, 0, real - 1);
+      opOneLinearScanBlock(totalReal, trustedMemory, real, inStructureId, 1);
+      totalReal += real;
+    } else {
+      opOneLinearScanBlock(j * blockSize, trustedMemory, readSize, inStructureId, 0);
+      int real = moveDummy(trustedMemory, readSize);
+      quickSort(trustedMemory, 0, real - 1);
+      opOneLinearScanBlock(totalReal, trustedMemory, readSize, outStructureId, 1);
+      totalReal += real;
+    }
+  }
+  assert(totalReal == N && "Output array number error");
+  return r % 2 == 0; // return 1->outId; 0->inId
+}
+
+
+// bitonic sort
 void smallBitonicMerge(int *a, int start, int size, int flipped) {
   if (size == 1) {
     return;
@@ -403,29 +723,31 @@ void bitonicSort(int structureId, int start, int size, int flipped, int* row1, i
 }
 
 // trusted function
-int callSort(int sortId, int structureId) {
+int callSort(int sortId, int *structureId) {
   // bitonic sort
   int size = paddedSize / BLOCK_DATA_SIZE;
   printf("size: %d %d\n", paddedSize, size);
+  if (sortId == 1) {
+    int inStructureId = structureId[0];
+    int sampleId = structureId[1];
+    int pivotsId = structureId[2];
+    int outStructureId = structureId[3];
+    return ObliviousSort(inStructureId, N, sampleId, pivotsId, outStructureId);
+  }
   if (sortId == 2) {
-    return bucketOSort(structureId, N);
+    return bucketOSort(structureId[0], N);
   }
   if (sortId == 3) {
     int *row1 = (int*)malloc(BLOCK_DATA_SIZE * sizeof(int));
     int *row2 = (int*)malloc(BLOCK_DATA_SIZE * sizeof(int));
-    bitonicSort(structureId, 0, size, 0, row1, row2);
+    bitonicSort(structureId[0], 0, size, 0, row1, row2);
+    free(row1);
+    free(row2);
     return -1;
   }
   return -1;
 }
 
-// Oblivious Bucket Sort
-
-#define DBGprint(...) { \
-  fprintf(stderr, "%s: Line %d:\t", __FILE__, __LINE__); \
-  fprintf(stderr, __VA_ARGS__); \
-  fprintf(stderr, "\n"); \
-}
 
 void padWithDummy(int structureId, int start, int realNum) {
   //int blockSize = structureSize[structureId];
@@ -443,21 +765,19 @@ void padWithDummy(int structureId, int start, int realNum) {
   free(junk);
 }
 
-void moveDummy(int structureId, int start) {
-  Bucket_x *temp = (Bucket_x*)malloc(BUCKET_SIZE * sizeof(Bucket_x));
-  opOneLinearScanBlock(start, (int*)temp, BUCKET_SIZE, structureId, 0);
+int moveDummy(int *a, int size) {
+  // k: #elem != DUMMY
   int k = 0;
-  for (int i = 0; i < BUCKET_SIZE; ++i) {
-    if (temp[i].x != DUMMY) {
+  for (int i = 0; i < size; ++i) {
+    if (a[i] != DUMMY) {
       if (i != k) {
-        swapRow(&temp[i], &temp[k++]);
+        swapRow(&a[i], &a[k++]);
       } else {
         k++;
       }
     }
   }
-  opOneLinearScanBlock(start, (int*)temp, BUCKET_SIZE, structureId, 1);
-  free(temp);
+  return k;
 }
 
 bool isTargetBitOne(int randomKey, int iter) {
@@ -536,8 +856,8 @@ void mergeSplit(int inputStructureId, int outputStructureId, int inputId0, int i
 }
 
 void kWayMergeSort(int inputStructureId, int outputStructureId, std::vector<int> &numRows1, std::vector<int> &numRows2, std::vector<int> bucketAddr) {
-  int mergeSortBatchSize = 128; // 256
-  int writeBufferSize = 256; // 8192
+  int mergeSortBatchSize = 256; // 256
+  int writeBufferSize = 8192; // 8192
   int numWays = (int)numRows1.size();
   HeapNode inputHeapNodeArr[numWays];
   int totalCounter = 0;
@@ -604,8 +924,20 @@ void swapRow(Bucket_x *a, Bucket_x *b) {
   free(temp);
 }
 
+void swapRow(int *a, int *b) {
+  int *temp = (int*)malloc(sizeof(int));
+  memmove(temp, a, sizeof(int));
+  memmove(a, b, sizeof(int));
+  memmove(b, temp, sizeof(int));
+  free(temp);
+}
+
 bool cmpHelper(Bucket_x *a, Bucket_x *b) {
   return (a->x > b->x) ? true : false;
+}
+
+bool cmpHelper(int *a, int *b) {
+  return (*a > *b) ? true : false;
 }
 
 int partition(Bucket_x *arr, int low, int high) {
@@ -625,7 +957,32 @@ int partition(Bucket_x *arr, int low, int high) {
   return (i + 1);
 }
 
+int partition(int *arr, int low, int high) {
+  int *pivot = arr + high;
+  int i = low - 1;
+  for (int j = low; j <= high - 1; ++j) {
+    if (cmpHelper(pivot, arr + j)) {
+      i++;
+      if (i != j) {
+        swapRow(arr + i, arr + j);
+      }
+    }
+  }
+  if (i + 1 != high) {
+    swapRow(arr + i + 1, arr + high);
+  }
+  return (i + 1);
+}
+
 void quickSort(Bucket_x *arr, int low, int high) {
+  if (high > low) {
+    int mid = partition(arr, low, high);
+    quickSort(arr, low, mid - 1);
+    quickSort(arr, mid + 1, high);
+  }
+}
+
+void quickSort(int *arr, int low, int high) {
   if (high > low) {
     int mid = partition(arr, low, high);
     quickSort(arr, low, mid - 1);
@@ -679,8 +1036,13 @@ int bucketOSort(int structureId, int size) {
       trustedMemory[j].key = randomKey;
       // TODO: improve
       int offset = bucketAddr1[(i + j) % bucketNum] + numRows1[(i + j) % bucketNum];
-      opOneLinearScanBlock(offset * 2, (int*)(&trustedMemory[j]), (size_t)1, structureId, 1);
-      
+      opOneLinearScanBlock(offset * 2, (int*)(&trustedMemory[j]), (size_t)1, structureId, 1);/*
+      std::cout << "=======RanDom=======\n";
+      paddedSize = bucketNum * BUCKET_SIZE;
+      std::cout<<"Offset: "<<offset<<std::endl;
+      std::cout<<trustedMemory[j].x<<" "<<trustedMemory[j].key<<std::endl;
+      print(structureId);
+      std::cout << "=======Random=======\n";*/
       paddedSize = bucketNum * BUCKET_SIZE;
       numRows1[(i + j) % bucketNum] ++;
     }
@@ -694,11 +1056,11 @@ int bucketOSort(int structureId, int size) {
     padWithDummy(structureId, bucketAddr1[i], numRows1[i]);
     
   }
-  
+  /*
   std::cout << "=======Initial=======\n";
   paddedSize = bucketNum * BUCKET_SIZE;
   print(structureId);
-  std::cout << "=======Initial=======\n";
+  std::cout << "=======Initial=======\n";*/
   
   for (int i = 0; i < ranBinAssignIters; ++i) {
     // data in Array1, update numRows2
@@ -734,21 +1096,16 @@ int bucketOSort(int structureId, int size) {
     for (int i = 0; i < bucketNum; ++i) {
       bucketSort(structureId, i, numRows1[i], bucketAddr1[i]);
     }
-    std::cout<<"=====After bucketsort1=====\n";
-    print(structureId);
-    std::cout<<"=====After bucketsort1=====\n";
     kWayMergeSort(structureId, structureId + 1, numRows1, numRows2, bucketAddr1);
     resultId = structureId + 1;
   } else {
     for (int i = 0; i < bucketNum; ++i) {
       bucketSort(structureId + 1, i, numRows2[i], bucketAddr2[i]);
     }
-    std::cout<<"=====After bucketsort0=====\n";
-    print(structureId + 1);
-    std::cout<<"=====After bucketsort0=====\n";
     kWayMergeSort(structureId + 1, structureId, numRows2, numRows1, bucketAddr2);
     resultId = structureId;
   }
+  DBGprint("SOrtId: %d", resultId);
   return resultId;
 }
 
@@ -765,18 +1122,17 @@ void test() {
   }
 
   printf(" TEST %s\n",(pass) ? "PASSed" : "FAILed");
-    print();
+    // print();
 }
 
 void test(int structureId) {
   int pass = 1;
   int i;
+  // print(structureId);
   for (i = 1; i < paddedSize; i++) {
     pass &= (((Bucket_x*)arrayAddr[structureId])[i-1].x <= ((Bucket_x*)arrayAddr[structureId])[i].x);
   }
-
   printf(" TEST %s\n",(pass) ? "PASSed" : "FAILed");
-    print(structureId);
 }
 
 
