@@ -55,7 +55,7 @@
 
 // #include "definitions.h"
 
-#define N 2000000//1100
+#define N 256//1100
 #define M 128 // M != B or OQSORT comes error
 #define B 10
 
@@ -81,10 +81,14 @@ typedef struct {
 
 // Function
 void init(void);
+void init(int structureId);
 void print(void);
-void print(int structureId);
+void print(int structureId, int size);
+void print(int *array, int size);
+void print(double *array, int size);
 void test(void);
 void test(int structureId);
+void test(int structureId, int intFlag);
 int greatestPowerOfTwoLessThan(int n);
 int smallestPowerOfTwoLargerThan(int n);
 void OcallReadBlock(int index, int* buffer, size_t blockSize, int structureId);
@@ -94,7 +98,7 @@ void smallBitonicSort(int *a, int start, int size, int flipped);
 void opOneLinearScanBlock(int index, int* block, size_t blockSize, int structureId, int write);
 void bitonicMerge(int structureId, int start, int size, int flipped, int* row1, int* row2);
 void bitonicSort(int structureId, int start, int size, int flipped, int* row1, int* row2);
-int callSort(int sortId, int structureId);
+int callSort(int sortId, int *structureId);
 
 void padWithDummy(int structureId, int start, int realNum);
 bool isTargetBitOne(int randomKey, int iter);
@@ -133,6 +137,17 @@ double seq_time;
 int paddedSize;
 const int ASCENDING  = 1;
 const int DESCENDING = 0;
+
+// array address
+enum storageAddr {
+  inputAddr, // =0
+  bucketAddr1, // =1
+  bucketAddr2, // =2
+  sampleAddr,  // =3
+  pivotsAddr,
+  oqAddr1,
+  oqAddr2
+};
 
 // structure Heap
 struct HeapNode {
@@ -227,11 +242,11 @@ public:
 
 /** the main program **/
 int main(int argc, char **argv) {
-
+  /*
   if (argc != 2) {
     printf("Usage: %s n\n  where n is problem size (power of two)\n", argv[0]);
     exit(1);
-  }
+  }*/
 
   //N = atoi(argv[1]);
   int addi = 0;
@@ -244,7 +259,7 @@ int main(int argc, char **argv) {
   // init();
   //gettimeofday (&startwtime, NULL);
   // smallBitonicSort(a, 0, paddedSize, 0);
-  // callSort(3, 0);
+  // callSort(3, bitonicAddr);
   //gettimeofday (&endwtime, NULL);
   //seq_time = (double)((endwtime.tv_usec - startwtime.tv_usec)/1.0e6
              // + endwtime.tv_sec - startwtime.tv_sec);
@@ -252,6 +267,7 @@ int main(int argc, char **argv) {
   // test();
   
   // TODO: test bucketOSort
+  /*
   srand((unsigned)time(NULL));
   int bucketNum = smallestPowerOfTwoLargerThan(ceil(2.0 * N / BUCKET_SIZE));
   int bucketSize = bucketNum * BUCKET_SIZE;
@@ -267,14 +283,41 @@ int main(int argc, char **argv) {
   arrayAddr[0] = a;
   paddedSize = N;
   init();
-  /*
-  std::cout << "=======InitialA=======\n";
-  print(0);
-  std::cout << "=======InitialA=======\n";*/
+  
   int resId = callSort(2, 1);
   paddedSize = N;
-  test(resId);
+  test(resId);*/
   // print();
+  
+  // TODO: test OQSORT
+  paddedSize = N;
+  arrayAddr[oqAddr1] = (int*)malloc(N * sizeof(int));
+  arrayAddr[oqAddr2] = (int*)malloc(N * sizeof(int));
+  int sampleSize = (int)ceil(2 * alpha * M) * (int)ceil(N / M);
+  arrayAddr[sampleAddr] = (int*)malloc(sampleSize * sizeof(int));
+  memset(arrayAddr[sampleAddr], 0xff, sampleSize * sizeof(int));
+  int pivotsSize = (int)ceil((ceil(alpha * N / M) / alpha));
+  arrayAddr[pivotsAddr] = (int*)malloc(pivotsSize * sizeof(int));
+  memset(arrayAddr[pivotsAddr], 0xff, sampleSize * sizeof(int));
+  structureSize[oqAddr1] = sizeof(int);
+  structureSize[sampleAddr] = sizeof(int);
+  structureSize[pivotsAddr] = sizeof(int);
+  structureSize[oqAddr2] = sizeof(int);
+  
+  init(oqAddr1);
+  int strucArray[4] = {oqAddr1, sampleAddr, pivotsAddr, oqAddr2};
+  // print(oqAddr1, paddedSize);
+  int resId = callSort(1, strucArray);
+  paddedSize = N;
+  print(resId, paddedSize);
+  test(resId, 1);
+  /*
+  free(arrayAddr[oqAddr1]);
+  free(arrayAddr[oqAddr2]);
+  free(arrayAddr[sampleAddr]);
+  free(arrayAddr[pivotsAddr]);*/
+  
+  return 1;
 }
 
 
@@ -353,36 +396,39 @@ int SampleWithOutReplace(int inStructureId, int samplesId) {
   int readStart = 0;
   int *y = (int*)malloc(M * sizeof(int));
   int *trustedMemory = (int*)malloc(M * sizeof(int));
+  std::random_device rd;
+  std::mt19937_64 generator(rd());
+  double rate = alpha;
+  std::bernoulli_distribution b(rate);
   
+  // 1. sample with bernouli
   for (int i = 0; i < boundary; i++) {
     Msize = std::min(M, N - i * M);
     opOneLinearScanBlock(readStart, trustedMemory, Msize, inStructureId, 0);
+    // print(trustedMemory, Msize);
     readStart += Msize;
     for (int j = 0; j < Msize; ++j) {
-      std::random_device rd;
-      std::mt19937_64 generator(rd());
-      double rate = alpha;
-      std::bernoulli_distribution b(rate);
       if (b(generator)) {
         n_prime --;
       } else {
         trustedMemory[j] = DUMMY;
       }
     }
+    // 2. move dummy & write back to external memory
     realNum += moveDummy(trustedMemory, Msize);
-    
     if (writeBacksize + alphaM2 >= M) {
       opOneLinearScanBlock(writeBackstart, y, writeBacksize, samplesId, 1);
       // only update here
+      // print(samplesId, M);
       writeBackstart += writeBacksize;
       writeBacksize = 0;
-      memcpy(y, trustedMemory, alphaM2);
+      memcpy(y, trustedMemory, alphaM2 * sizeof(int));
     } else {
-      memcpy(y + writeBackstart, trustedMemory, alphaM2);
+      memcpy(y + writeBacksize, trustedMemory, alphaM2 * sizeof(int));
       writeBacksize += alphaM2;
     }
   }
-  
+  opOneLinearScanBlock(writeBackstart, y, writeBacksize, samplesId, 1);
   free(trustedMemory);
   free(y);
   if (realNum < (int)(alpha * N)) {
@@ -391,33 +437,37 @@ int SampleWithOutReplace(int inStructureId, int samplesId) {
   return realNum;
 }
 
-// TODO: at the end, free y & pivots
-// TODO: M has the same size with BLOCK_DATA_SIZE
-// TODO: dummy elements in the sampled should be placed at the end
+// TODO: check k >= M case, change M to a smaller number
 int PivotsSelection(int inStructureId, int samplesId, int pivotsId) {
-  int res = -1;
-  // If fail, repeat
-  while (res == -1) {
-    res = SampleWithOutReplace(inStructureId, samplesId);
+  // 1. sort samples
+  int numSamples = -1;
+  while (numSamples == -1) {
+    numSamples = SampleWithOutReplace(inStructureId, samplesId);
   }
-  // sort pivots using bitonic sort, we can use sort algorithm randomly here
-  int *row1 = (int*)malloc(BLOCK_DATA_SIZE * sizeof(int));
-  int *row2 = (int*)malloc(BLOCK_DATA_SIZE * sizeof(int));
-  bitonicSort(samplesId, 0, res, 0, row1, row1);
-  free(row1);
-  free(row2);
-  // int pSize = (int)ceil(N / M);
+  int sampleSize = (int)ceil(2 * alpha * N);
+  int *samples = (int*)malloc(sizeof(int) * sampleSize);
+  opOneLinearScanBlock(0, samples, sampleSize, samplesId, 0);
+  moveDummy(samples, sampleSize);
+  // TODO: bitonic sort need to pad with dummy to satisfy entire block data size, so currently use quicksort
+  quickSort(samples, 0, numSamples - 1);
+  opOneLinearScanBlock(0, samples, numSamples, samplesId, 1);
+  free(samples);
+  std::cout<<"=====print samples=====\n";
+  print(samplesId, numSamples);
+  // 2. get pivots
   int *p = (int*)malloc(M * sizeof(int));
   double j = alpha * M;
   int k = 0;
-  // TODO: why still return *p if the pivots are stored in pivotsId
-  int totalK = 0; // #pivots
+  int realPivots = 0; // #pivots
   int end = (int)ceil(alpha * N / M);
   int *trustedMemory = (int*)malloc(M * sizeof(int));
   int writeBackstart = 0;
   int readStart = 0;
-  
-  for (int i = 0; i < end; ++i) {
+  double endPivotsIdx = alpha * M;
+  int quitFlag = 1;
+  int totalK = 0;
+  // 3. pivots read & write back
+  for (int i = 0; i < end && quitFlag; ++i) {
     int Msize = std::min(M, (int)ceil(alpha * N) - i * M);
     opOneLinearScanBlock(readStart, trustedMemory, Msize, samplesId, 0);
     readStart += Msize;
@@ -426,19 +476,30 @@ int PivotsSelection(int inStructureId, int samplesId, int pivotsId) {
       if (k >= M) {
         opOneLinearScanBlock(writeBackstart, p, M, pivotsId, 1);
         writeBackstart += M;
-        totalK += M;
         k -= M;
       }
       p[k++] = trustedMemory[indexj];
+      totalK ++; // will not reduced even written back
       j += alpha * M;
+      endPivotsIdx += alpha * M;
+      // 4. out of samples index
+      if (endPivotsIdx > numSamples - 1) {
+        opOneLinearScanBlock(writeBackstart, p, k, pivotsId, 1);
+        realPivots = totalK;
+        quitFlag = 0;
+        break;
+      }
     }
     j -= M;
   }
-  // TODO: Left write back
-  opOneLinearScanBlock(writeBackstart, p, k, pivotsId, 1);
-  totalK += k;
+  /*
+  std::cout<<"-----print pivots-----\n";
+  print(p, realPivots);
+  std::cout<<"-----print pivots extrenal-----\n";*/
+  print(pivotsId, realPivots);
+  free(p);
   free(trustedMemory);
-  return totalK; // p is not the full pivots
+  return realPivots;
 }
 
 int upperBound(int *a, int size, int k) {
@@ -457,6 +518,7 @@ int upperBound(int *a, int size, int k) {
 
 
 // TODO: change memory to P with circular division (Finished)
+// TODO: malloc error, need to justify return pointer != NULL
 int DataPartition(int inStructureId, int outStructureId, double *quanP, int P, int levelSize) {
   int M_prime = (int)ceil(M / (1 + 2 * beta));
   int XiSize = (int)ceil(N * B / M_prime);
@@ -468,7 +530,7 @@ int DataPartition(int inStructureId, int outStructureId, double *quanP, int P, i
   int end = (int)ceil(N / M_prime);
   int psecSize = (int)ceil(M / P);
   int readStart = 0;
-  // Inidicate #elem in bucket(#bucket = P)
+  // 3. initialize each section
   int *offset = (int*)malloc(P * sizeof(int));
   memset(offset, 0, P * sizeof(int));
   int *writeBackOffset = (int*)malloc(P * sizeof(int));
@@ -477,9 +539,10 @@ int DataPartition(int inStructureId, int outStructureId, double *quanP, int P, i
   int *xiSec = (int*)malloc(psecSize * sizeof(int));
   memset(xiSec, DUMMY, psecSize * sizeof(int));
   int retFlag = 1;
-  // TODO: check fail condition: move more than M/P elements
+  // 4. seperate elements
   for (int j = 0; j < end; ++j) {
     int jstart = j * psecSize;
+    // TODO: error: it becomes negative number
     blockSize = std::min(M_prime, levelSize - j * M_prime);
     opOneLinearScanBlock(readStart, trustedMemory, blockSize, inStructureId, 0);
     readStart += blockSize;
@@ -519,9 +582,8 @@ int DataPartition(int inStructureId, int outStructureId, double *quanP, int P, i
       offset[i] = 0;
       memset(xiSec, DUMMY, psecSize * sizeof(int));
     } // end-i
-    
   } // end-j
-  // TODO: Free data structure
+  
   free(offset);
   free(writeBackOffset);
   free(trustedMemory);
@@ -544,22 +606,23 @@ double quantileCal(int *a, int size, double rate) {
 // TODO: 主要是用来限制oponelinear一次读取进来的数据大小
 int ObliviousSort(int inStructureId, int inSize, int sampleId, int pivotsId, int outStructureId) {
   int *trustedMemory = NULL;
+  // 1. N <= M case, use quicksort
   if (N <= M) {
     trustedMemory = (int*)malloc(N);
-    // TODO: use sort algorithm
-    // TODO: Change blockSize to BLOCK_DATA_SIZE
     opOneLinearScanBlock(0, trustedMemory, N, inStructureId, 0);
     quickSort(trustedMemory, 0, N - 1);
     opOneLinearScanBlock(0, trustedMemory, N, outStructureId, 1);
     free(trustedMemory);
-    return 1;
+    return outStructureId;
   }
-  // TODO: p is the address of pivots, which need to free
+  // 2. select pivots
   int numPivots = -1;
   numPivots = PivotsSelection(inStructureId, sampleId, pivotsId);
-  // Fisher-Yates shuffle
-  // TODO: 这里是使用paddwithdummy还是shuffle一部分数据？
-  trustedMemory = (int*)malloc(2 * B * sizeof(int));
+  std::cout<<"=====Output Pivots=====\n";
+  print(pivotsId, numPivots);
+  std::cout<<"=====Output Pivots=====\n";
+  // 3. Fisher-Yates shuffle
+  trustedMemory = (int*)malloc(2 *  B * sizeof(int));
   int iEnd = (int)ceil(N/B) - 2;
   for (int i = 0; i <= iEnd; ++i) {
     std::default_random_engine generator;
@@ -575,27 +638,34 @@ int ObliviousSort(int inStructureId, int inSize, int sampleId, int pivotsId, int
     opOneLinearScanBlock(i * B, &trustedMemory[B], jSize, inStructureId, 1);
     opOneLinearScanBlock(j * B, trustedMemory, jSize, inStructureId, 1);
   }
-  // double M_prime = ceil(M / (1 + 2 * beta));
+  free(trustedMemory);
+  /* shuffle success
+  std::cout<<"-----input-----\n";
+  print(inStructureId, N);
+  std::cout<<"-----input-----\n";*/
+  // 4. level iteration
+  // TODO: local pointer is free but the matched memory is not free
   int r = (int)ceil(log(N / M) / log(numPivots / (1 + 2 * beta)));
   int levelSize = 0;
-  // TODO: 这里使用inStructId和outStructId两个数组进行轮换，以实现r层数据的partition
-  // TODO: should pad with dummy
   for (int i = 0; i < r; ++i) {
     int jEnd = (int)ceil(pow(M/B, i));
     int W = (int)((N/M)/jEnd);
-    int *p = (int*)malloc(W * sizeof(int));
+    std::cout<<"W: "<<W<<", jEnd: "<<jEnd<<std::endl;
+    int *p = (int*)malloc(W * sizeof(int)); // read pivots
     double *quanP = (double*)malloc(sizeof(double) * jEnd);
     for (int j = 0; j < jEnd; ++j) {
       int wSize = std::min(W, numPivots - j * W);
       opOneLinearScanBlock(j * W, p, wSize, pivotsId, 0);
-      // TODO: use i 的奇偶性来进行区分
-      quanP[j] = quantileCal(&p[j * W], wSize, M / B);
+      quanP[j] = quantileCal(&p[j * W], wSize, B / M);
+      std::cout<<jEnd<<"-----quantile-----\n";
+      std::cout<<quanP[j]<<std::endl;
     }
-    
+    free(p);
     int XiSize = (int)ceil(N * B * (1 + 2 * beta) / M);
-    levelSize = jEnd * XiSize; // use two part both ceiling
+    // Use two part both ceiling
+    levelSize = jEnd * XiSize;
     int flag = 0;
-    if (i % 2) {
+    if (i % 2 == 0) {
       while (!flag) {
         flag = DataPartition(inStructureId, outStructureId, quanP, jEnd, levelSize);
       }
@@ -604,15 +674,16 @@ int ObliviousSort(int inStructureId, int inSize, int sampleId, int pivotsId, int
         flag = DataPartition(outStructureId, inStructureId, quanP, jEnd, levelSize);
       }
     }
+    free(quanP);
   }
+  // 5. sort last level
   int jEnd = (int)pow(M/B, r);
   int blockSize = (int)ceil(M/B);
   int totalReal = 0; // use for write back address
-  // TODO: previous pointed should be free
-  trustedMemory = (int*)malloc((int)ceil(M/B) * sizeof(int));
+  trustedMemory = (int*)malloc(blockSize * sizeof(int));
   for (int j = 0; j < jEnd; ++j) {
     int readSize = std::min(blockSize, levelSize - j * blockSize);
-    if (r % 2) {
+    if (r % 2 == 0) {
       opOneLinearScanBlock(j * blockSize, trustedMemory, readSize, outStructureId, 0);
       int real = moveDummy(trustedMemory, readSize);
       quickSort(trustedMemory, 0, real - 1);
@@ -627,6 +698,7 @@ int ObliviousSort(int inStructureId, int inSize, int sampleId, int pivotsId, int
     }
   }
   assert(totalReal == N && "Output array number error");
+  free(trustedMemory);
   return r % 2 == 0; // return 1->outId; 0->inId
 }
 
@@ -925,11 +997,10 @@ void swapRow(Bucket_x *a, Bucket_x *b) {
 }
 
 void swapRow(int *a, int *b) {
-  int *temp = (int*)malloc(sizeof(int));
-  memmove(temp, a, sizeof(int));
+  int temp;
+  memmove(&temp, a, sizeof(int));
   memmove(a, b, sizeof(int));
-  memmove(b, temp, sizeof(int));
-  free(temp);
+  memmove(b, &temp, sizeof(int));
 }
 
 bool cmpHelper(Bucket_x *a, Bucket_x *b) {
@@ -1135,6 +1206,16 @@ void test(int structureId) {
   printf(" TEST %s\n",(pass) ? "PASSed" : "FAILed");
 }
 
+void test(int structureId, int intFlag) {
+  int pass = 1;
+  int i;
+  // print(structureId);
+  for (i = 1; i < paddedSize; i++) {
+    pass &= (arrayAddr[structureId][i-1] <= arrayAddr[structureId][i]);
+  }
+  printf(" TEST %s\n",(pass) ? "PASSed" : "FAILed");
+}
+
 
 /** procedure init() : initialize array "a" with data **/
 void init() {
@@ -1142,6 +1223,15 @@ void init() {
   for (i = 0; i < paddedSize; i++) {
     // a[i] = rand() % N; // (N - i);
     a[i] = (paddedSize - i);
+  }
+}
+
+void init(int structureId) {
+  int i;
+  int *addr = arrayAddr[structureId];
+  for (i = 0; i < paddedSize; i++) {
+    // a[i] = rand() % N; // (N - i);
+    addr[i] = (paddedSize - i);
   }
 }
 
@@ -1155,9 +1245,9 @@ void print() {
 }
 
 // Judge by structure size
-void print(int structureId) {
+void print(int structureId, int size) {
   int i;
-  for (i = 0; i < paddedSize; i++) {
+  for (i = 0; i < size; i++) {
     if(structureSize[structureId] == 4) {
       // int
       int *addr = (int*)arrayAddr[structureId];
@@ -1167,6 +1257,22 @@ void print(int structureId) {
       Bucket_x *addr = (Bucket_x*)arrayAddr[structureId];
       printf("(%d, %d), ", addr[i].x, addr[i].key);
     }
+  }
+  printf("\n");
+}
+
+void print(int *array, int size) {
+  int i;
+  for (i = 0; i < size; i++) {
+    printf("%d ", array[i]);
+  }
+  printf("\n");
+}
+
+void print(double *array, int size) {
+  int i;
+  for (i = 0; i < size; i++) {
+    printf("%f ", array[i]);
   }
   printf("\n");
 }
