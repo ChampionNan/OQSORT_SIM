@@ -56,7 +56,7 @@
 
 
 #define N 3000000//1100
-#define M 2048
+#define M 16384
 #define NUM_STRUCTURES 10
 // #define MEM_IN_ENCLAVE 5
 #define DUMMY 0xffffffff
@@ -263,7 +263,7 @@ int main(int argc, const char* argv[]) {
     arrayAddr[0] = X;
   } else if (sortId == 1) {
     srand((unsigned)time(NULL));
-    int k = M / BLOCK_DATA_SIZE;
+    int k = M / BUCKET_SIZE;
     assert(k >= 2 && "M/B must greater than 2");
     int bucketNum = smallestPowerOfKLargerThan(ceil(2.0 * N / BUCKET_SIZE), k);
     int bucketSize = bucketNum * BUCKET_SIZE;
@@ -876,11 +876,14 @@ void mergeSplitHelper(Bucket_x *inputBuffer, int inputBufferLen, int* numRow2, i
 }
 
 void mergeSplit(int inputStructureId, int outputStructureId, int *inputId, int *outputId, int k, int* bucketAddr, int* numRow1, int* numRow2, int iter) {
-  Bucket_x *inputBuffer = (Bucket_x*)malloc(sizeof(Bucket_x) * BUCKET_SIZE);
-  // BLOCKs
+  // step1. Read k buckets together
+  Bucket_x *inputBuffer = (Bucket_x*)malloc(k * sizeof(Bucket_x) * BUCKET_SIZE);
   for (int i = 0; i < k; ++i) {
-    opOneLinearScanBlock(2 * bucketAddr[inputId[i]], (int*)inputBuffer, BUCKET_SIZE, inputStructureId, 0);
-    mergeSplitHelper(inputBuffer, numRow1[inputId[i]], numRow2, outputId, iter, k, bucketAddr, outputStructureId);
+    opOneLinearScanBlock(2 * bucketAddr[inputId[i]], (int*)(&inputBuffer[i * BUCKET_SIZE]), BUCKET_SIZE, inputStructureId, 0);
+  }
+  // step2. process k buckets
+  for (int i = 0; i < k; ++i) {
+    mergeSplitHelper(&inputBuffer[i * BUCKET_SIZE], numRow1[inputId[i]], numRow2, outputId, iter, k, bucketAddr, outputStructureId);
     for (int j = 0; j < k; ++j) {
       if (numRow2[outputId[j]] > BUCKET_SIZE) {
         printf("overflow error during merge split!\n");
@@ -965,7 +968,7 @@ void bucketSort(int inputStructureId, int bucketId, int size, int dataStart) {
 
 // int inputTrustMemory[BLOCK_DATA_SIZE];
 int bucketOSort(int structureId, int size) {
-  int k = M / BLOCK_DATA_SIZE;
+  int k = M / BUCKET_SIZE;
   int bucketNum = smallestPowerOfKLargerThan(ceil(2.0 * size / BUCKET_SIZE), k);
   int ranBinAssignIters = log(bucketNum)/log(k) - 1;
   std::cout << "Iteration times: " << ranBinAssignIters << std::endl;
