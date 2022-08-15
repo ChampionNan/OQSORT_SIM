@@ -101,10 +101,10 @@ if __name__ == '__main__':
 	# params = oqsort(400, 4, 0.2)
 	# print(params.get_pmax(20))
 	# params.print_all(20)
-	# N = 9 *16*2**16
-	# M, B, kappa = 16*2**16, 8, 28
-	N = 9000000
-	M, B, kappa = 1000000, 8, 28
+	N = 9 *16*2**16 # 9437184
+	M, B, kappa = 16*2**16, 8, 28 # 1048576
+	# N = 9000000
+	# M, B, kappa = 1000000, 4, 28
 	params = onelevel_oqsort(N, M, B, kappa)
 	alpha = params.get_alpha()
 	beta = params.get_beta()

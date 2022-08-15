@@ -55,8 +55,8 @@
 #include <chrono>
 #include <utility>
 
-#define N 9000000//10000000
-#define M 1000000 // int type memory restriction
+#define N 9437184//10000000
+#define M 1048576 // int type memory restriction
 #define NUM_STRUCTURES 10
 // #define MEM_IN_ENCLAVE 5
 #define DUMMY 0xffffffff
@@ -64,8 +64,7 @@
 // #define B 10
 
 #define ALPHA 0.111
-#define BETA 0.177
-#define GAMMA 0.1
+#define BETA 0.168
 #define P 13
 
 #define FAN_OUT 2
@@ -263,7 +262,7 @@ int main(int argc, const char* argv[]) {
   // oe_enclave_t* enclave = NULL;
   std::chrono::high_resolution_clock::time_point start, end;
   std::chrono::seconds duration;
-  freopen("/Users/apple/Desktop/Lab/ALLSORT/ALLSORT/out.txt", "w+", stdout);
+  //freopen("/Users/apple/Desktop/Lab/ALLSORT/ALLSORT/out.txt", "w+", stdout);
   // 0: OSORT-Tight, 1: OSORT-Loss, 2: bucketOSort, 3: bitonicSort
   int sortId = 0;
   int oqId;
@@ -513,23 +512,23 @@ int SampleLoose(int inStructureId, int samplesId) {
     Msize = std::min(BLOCK_DATA_SIZE, N - i * BLOCK_DATA_SIZE);
     m = Hypergeometric(N_prime, Msize, n_prime);
     if (m > 0) {
-      realNum += std::min(m, n_prime);
+      realNum += m;
       opOneLinearScanBlock(readStart, trustedMemory, Msize, inStructureId, 0);
       readStart += Msize;
       // step2. shuffle M
       shuffle(trustedMemory, Msize);
       // step4. write sample back to external memory
-      opOneLinearScanBlock(k, trustedMemory, std::min(m, n_prime), samplesId, 1);
-      k += std::min(m, n_prime);
+      opOneLinearScanBlock(k, trustedMemory, m, samplesId, 1);
+      k += m;
     }
     N_prime -= Msize;
-    n_prime -= std::min(m, n_prime);
+    n_prime -= m;
     if (n_prime <= 0) {
       break;
     }
     // TODO: ? what's m value
   }
-  
+  trustedMemory = (int*)realloc(trustedMemory, M * sizeof(int));
   if (realNum < M) {
     opOneLinearScanBlock(0, trustedMemory, realNum, samplesId, 0);
     quickSort(trustedMemory, 0, realNum - 1);
@@ -590,17 +589,14 @@ int quantileCal(int sampleId, int start, int end, int p, int *trustedM1) {
   // TODO: ADD test pivots correct value
   bool passFlag = 1;
   for (int i = 0; i < p; ++i) {
+    // std::cout << trustedM1[i] << ", " << trustedM1[i+1] << std::endl;
     passFlag &= (trustedM1[i] < trustedM1[i+1]);
     if (trustedM1[i + 1] < 0) {
       passFlag = 0;
       break;
     }
   }
-  if (passFlag) {
-    return 1;
-  } else {
-    return 0;
-  }
+  return passFlag;
 }
 
 int ProcessL(int LIdIn, int LIdOut, int lsize) {
@@ -627,6 +623,7 @@ int ProcessL(int LIdIn, int LIdOut, int lsize) {
   int bucketNum = (int)ceil(1.0 * lsize / M);
   int bucketSize = lsize / bucketNum;
   int residual = lsize % bucketNum;
+  int totalSize = 0;
   int *numRow = (int*)malloc(sizeof(int) * bucketNum);
   int *bucketAddr = (int*)malloc(sizeof(int) * bucketNum);
   memset(numRow, 0, sizeof(int) * bucketNum);
@@ -635,10 +632,12 @@ int ProcessL(int LIdIn, int LIdOut, int lsize) {
     if (i == 0) {
       bucketAddr[i] = 0;
     } else {
-      bucketAddr[i] = numRow[i - 1];
+      totalSize += numRow[i - 1];
+      bucketAddr[i] = totalSize;
     }
   }
   for (int i = 0; i < bucketNum; ++i) {
+    std::cout << LIdIn << ", " << i << ", " <<numRow[i] << ", " << bucketAddr[i] << std::endl;
     bucketSort(LIdIn, i, numRow[i], bucketAddr[i]);
   }
   // print(arrayAddr, LIdIn, lsize);
@@ -728,15 +727,15 @@ std::pair<int, int> MultiLevelPartition(int inStructureId, int sampleId, int LId
     }
   }
   // 7. pad dummy
-  std::cout << "Before padding: \n";
-  print(arrayAddr, outStructureId1, boundary1 * smallSectionSize * p0);
+  // std::cout << "Before padding: \n";
+  // print(arrayAddr, outStructureId1, boundary1 * smallSectionSize * p0);
   for (int j = 0; j < p0; ++j) {
     for (int i = 0; i < boundary1; ++i) {
       padWithDummy(outStructureId1, j * bucketSize0 + i * smallSectionSize, bucketNum[j][i], smallSectionSize);
     }
   }
-  std::cout << "After padding: \n";
-  print(arrayAddr, outStructureId1, boundary1 * smallSectionSize * p0);
+  // std::cout << "After padding: \n";
+  // print(arrayAddr, outStructureId1, boundary1 * smallSectionSize * p0);
   free(trustedM1);
   free(trustedM2);
   free(trustedM3);
@@ -764,10 +763,11 @@ int ObliviousTightSort(int inStructureId, int inSize, int sampleId, int LIdIn, i
   int realNum = SampleTight(inStructureId, sampleId);
   int n = (int)ceil(1.0 * ALPHA * N);
   while (realNum < 0 || realNum < n) {
+    std::cout << "Samples number error!\n";
     realNum = SampleTight(inStructureId, sampleId);
   }
   
-  std::pair<int, int> section = MultiLevelPartition(inStructureId, sampleId, LIdIn, LIdOut, realNum, P, outStructureId1);
+  std::pair<int, int> section = MultiLevelPartition(inStructureId, sampleId, LIdIn, LIdOut, std::min(realNum, n), P, outStructureId1);
   int sectionSize = section.first;
   int sectionNum = section.second;
   int totalLevelSize = sectionNum * sectionSize;
@@ -789,7 +789,7 @@ int ObliviousTightSort(int inStructureId, int inSize, int sampleId, int LIdIn, i
     }
   }
   std::cout << "After inter-sorting: \n";
-  print(arrayAddr, outStructureId2, inSize);
+  // print(arrayAddr, outStructureId2, inSize);
   return outStructureId2;
 }
 
@@ -802,7 +802,13 @@ int ObliviousLooseSort(int inStructureId, int inSize, int sampleId, int LIdIn, i
     return outStructureId1;
   }
   int realNum = SampleLoose(inStructureId, sampleId);
-  std::pair<int, int> section = MultiLevelPartition(inStructureId, sampleId, LIdIn, LIdOut, realNum, P, outStructureId1);
+  int n = (int)ceil(1.0 * ALPHA * N);
+  while (realNum < 0 || realNum < n) {
+    std::cout << "Samples number error!\n";
+    realNum = SampleTight(inStructureId, sampleId);
+  }
+
+  std::pair<int, int> section = MultiLevelPartition(inStructureId, sampleId, LIdIn, LIdOut, std::min(realNum, n), P, outStructureId1);
   int sectionSize = section.first;
   int sectionNum = section.second;
   int j = 0;
@@ -814,11 +820,7 @@ int ObliviousLooseSort(int inStructureId, int inSize, int sampleId, int LIdIn, i
   for (int i = 0; i < sectionNum; ++i) {
     Msize = std::min(sectionSize, hatN - i * sectionSize);
     opOneLinearScanBlock(i * sectionSize, trustedM, Msize, outStructureId1, 0);
-    for (k = 0; k < Msize; ++k) {
-      if (trustedM[k] == DUMMY) {
-        break;
-      }
-    }
+    k = moveDummy(trustedM, Msize);
     quickSort(trustedM, 0, k - 1);
     opOneLinearScanBlock(j, trustedM, k, outStructureId2, 1);
     j += k;
@@ -1295,6 +1297,10 @@ int partition(Bucket_x *arr, int low, int high) {
 }
 
 int partition(int *arr, int low, int high) {
+  // TODO: random version
+  srand(unsigned(time(NULL)));
+  int randNum = rand() % (high - low + 1) + low;
+  swapRow(arr + high, arr + randNum);
   int *pivot = arr + high;
   int i = low - 1;
   for (int j = low; j <= high - 1; ++j) {
