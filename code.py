@@ -75,7 +75,8 @@ class onelevel_oqsort:
         self.N, self.M, self.B, self.kappa = N, M, B, kappa
 
     def get_alpha(self):
-    	return self.M/self.N
+    	# return self.M/self.N
+    	return 0.02
 
     def get_p(self, beta):
         return ceil((1+2*beta)*self.N/self.M)
@@ -102,7 +103,7 @@ if __name__ == '__main__':
 	# print(params.get_pmax(20))
 	# params.print_all(20)
 	N = 9 *16*2**16 # 9437184
-	M, B, kappa = 16*2**16, 8, 28 # 1048576
+	M, B, kappa = 16*2**16, 4, 28 # 1048576
 	# N = 9000000
 	# M, B, kappa = 1000000, 4, 28
 	params = onelevel_oqsort(N, M, B, kappa)
