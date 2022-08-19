@@ -225,6 +225,7 @@ Bucket_x *bucketx2;
 int *Y;
 int *arrayAddr[NUM_STRUCTURES];
 int paddedSize;
+int IOcost = 0;
 // TODO: set up structure size
 const int structureSize[NUM_STRUCTURES] = {sizeof(int),
   sizeof(Bucket_x), sizeof(Bucket_x),
@@ -247,6 +248,7 @@ void OcallReadBlock(int index, int* buffer, size_t blockSize, int structureId) {
   }
   // memcpy(buffer, arrayAddr[structureId] + index, blockSize * structureSize[structureId]);
   memcpy(buffer, arrayAddr[structureId] + index, blockSize);
+  IOcost += 1;
 }
 
 void OcallWriteBlock(int index, int* buffer, size_t blockSize, int structureId) {
@@ -256,6 +258,7 @@ void OcallWriteBlock(int index, int* buffer, size_t blockSize, int structureId) 
   }
   // memcpy(arrayAddr[structureId] + index, buffer, blockSize * structureSize[structureId]);
   memcpy(arrayAddr[structureId] + index, buffer, blockSize);
+  IOcost += 1;
 }
 
 
