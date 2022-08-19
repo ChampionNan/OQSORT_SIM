@@ -56,8 +56,8 @@
 #include <fstream>
 #include <algorithm>
 
-#define N 10000000//10000000
-#define M 1111112 // int type memory restriction
+#define N 6000000//10000000
+#define M 666667 // int type memory restriction
 #define NUM_STRUCTURES 10
 // #define MEM_IN_ENCLAVE 5
 #define DUMMY 0xffffffff
@@ -65,11 +65,11 @@
 // #define B 10
 
 #define ALPHA 0.020
-#define BETA 0.158
-#define P 12
+#define BETA 0.205
+#define P 13
 
 #define FAN_OUT 2
-#define BLOCK_DATA_SIZE 8
+#define BLOCK_DATA_SIZE 6
 #define BUCKET_SIZE 337//256
 #define MERGE_BATCH_SIZE 20 // merge split hepler
 #define HEAP_NODE_SIZE 20//8192. heap node size
@@ -213,7 +213,7 @@ void quickSort(Bucket_x *arr, int low, int high);
 void quickSort(int *arr, int low, int high);
 int moveDummy(int *a, int size);
 
-int Hypergeometric(int NN, int Msize, double n_prime);
+int Hypergeometric(int NN, int Msize, int n_prime);
 
 
 int *X;
@@ -432,24 +432,39 @@ int CombiNum(int n, int m) {
 }
 
 // TODO: calculate Hypergeometric Distribution
-int Hypergeometric(int NN, int Msize, double n_prime) {
+/*
+int Hypergeometric(int NN, int Msize, int n_prime) {
   int m = 0;
   std::random_device rd;
   std::mt19937_64 generator(rd());
-  double rate = n_prime / double(NN);
+  double rate = double(n_prime) / NN;
   std::bernoulli_distribution b(rate);
   for (int j = 0; j < Msize; ++j) {
     if (b(generator)) {
-      m ++;
+      m += 1;
       n_prime -= 1;
     }
     NN -= 1;
-    rate = n_prime / double(NN);
+    rate = double(n_prime) / double(NN);
     std::bernoulli_distribution b(rate);
   }
   return m;
+}*/
+int Hypergeometric(int NN, int Msize, int n_prime) {
+  int m = 0;
+  srand((unsigned)time(0));
+  double rate = double(n_prime) / NN;
+  for (int j = 0; j < Msize; ++j) {
+    if (rand() / double(RAND_MAX) < rate) {
+      m += 1;
+      n_prime -= 1;
+    }
+    NN -= 1;
+    rate = double(n_prime) / double(NN);
+  }
+  return m;
 }
-  
+
 void shuffle(int *array, int n) {
   if (n > 1) {
     for (int i = 0; i < n - 1; ++i) {
@@ -463,7 +478,7 @@ void shuffle(int *array, int n) {
 
 int SampleTight(int inStructureId, int samplesId) {
   int N_prime = N;
-  double n_prime = 1.0 * ALPHA * N;
+  int n_prime = ceil(1.0 * ALPHA * N);
   int alphaM2 = (int)ceil(2.0 * ALPHA * M);
   int boundary = (int)ceil(1.0 * N/M);
   int Msize, alphaM22;
@@ -483,7 +498,7 @@ int SampleTight(int inStructureId, int samplesId) {
     readStart += Msize;
     // step1. sample with hypergeometric distribution
     m = Hypergeometric(N_prime, Msize, n_prime);
-    if (m > alphaM22) {
+    if (m > alphaM22 && (i != boundary - 1)) {
       return -1;
     }
     realNum += m;
@@ -492,10 +507,14 @@ int SampleTight(int inStructureId, int samplesId) {
     // step3. set dummy
     memset(&trustedMemory[m], DUMMY, (Msize - m) * sizeof(int));
     // step4. write sample back to external memory
+    // TODO: ERROR, sample size too large
     opOneLinearScanBlock(writeBackstart, trustedMemory, alphaM22, samplesId, 1);
     writeBackstart += alphaM22;
     N_prime -= Msize;
     n_prime -= m;
+    if (n_prime <= 0) {
+      break;
+    }
   }
   
   if (realNum < M) {
@@ -504,12 +523,6 @@ int SampleTight(int inStructureId, int samplesId) {
     if (realN != realNum) {
       std::cout << "Counting error after moving dummy.\n";
     }
-    double nonDummyNum = ALPHA * N;
-    if (realN != ceil(nonDummyNum)) {
-      std::cout << realN << ", " << nonDummyNum << std::endl;
-      return -1;
-    }
-    
     quickSort(trustedMemory, 0, realN - 1);
     opOneLinearScanBlock(0, trustedMemory, realN, samplesId, 1);
     // print(arrayAddr, samplesId, realN);
@@ -517,13 +530,15 @@ int SampleTight(int inStructureId, int samplesId) {
     std::cout << "RealNum >= M\n";
     return -1;
   }
+  double nonDummyNum = ALPHA * N;
+  std::cout << realNum << ", " << nonDummyNum << std::endl;
   free(trustedMemory);
   return realNum;
 }
 
 int SampleLoose(int inStructureId, int samplesId) {
   int N_prime = N;
-  double n_prime = 1.0 * ALPHA * N;
+  int n_prime = ceil(1.0 * ALPHA * N);
   int boundary = (int)ceil(1.0 * N/BLOCK_DATA_SIZE);
   int Msize;
   int m; // use for hypergeometric distribution
@@ -547,9 +562,10 @@ int SampleLoose(int inStructureId, int samplesId) {
       // step4. write sample back to external memory
       opOneLinearScanBlock(k, trustedMemory, m, samplesId, 1);
       k += m;
+      // TODO: n_prime should be placed in if (m > 0)
+      n_prime -= m;
     }
     N_prime -= Msize;
-    n_prime -= m;
     if (n_prime <= 0) {
       break;
     }
@@ -565,10 +581,7 @@ int SampleLoose(int inStructureId, int samplesId) {
     return -1;
   }
   double nonDummyNum = ALPHA * N;
-  if (realNum != ceil(nonDummyNum)) {
-    std::cout << realNum << ", " << nonDummyNum << std::endl;
-    return -1;
-  }
+  std::cout << realNum << ", " << nonDummyNum << std::endl;
   free(trustedMemory);
   return realNum;
 }
@@ -723,7 +736,8 @@ std::pair<int, int> MultiLevelPartition(int inStructureId, int sampleId, int LId
     memset(bucketNum[i], 0, sizeof(int) * boundary1);
   }
   int Msize1, Msize2;
-  int smallSectionSize = (int)ceil(1.0 * M / (2 * p0));
+  // int smallSectionSize = (int)ceil(1.0 * M / (2 * p0));
+  int smallSectionSize = M / (2 * p0);
   // 5. allocate out memory using for index
   freeAllocate(outStructureId1, outStructureId1, boundary1 * smallSectionSize * p0);
   int bucketSize0 = boundary1 * smallSectionSize;
