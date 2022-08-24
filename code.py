@@ -74,17 +74,31 @@ class onelevel_oqsort:
     def __init__(self, N, M, B, kappa):
         self.N, self.M, self.B, self.kappa = N, M, B, kappa
 
-    def get_alpha(self):
-    	# return self.M/self.N
-    	return 0.02
+    def get_alpha(self, beta): # old alpha=0.02
+        N, M, B, kappa = self.N, self.M, self.B, self.kappa
+        return (kappa+1+log(N))*4*(1+beta)*(1+2*beta)/beta/beta/M
+
+    def get_alpha_tight(self, beta): # 还是统一算
+        N, M, B, kappa = self.N, self.M, self.B, self.kappa
+        return M/(2*N)
 
     def get_p(self, beta):
         return ceil((1+2*beta)*self.N/self.M)
 
-    def get_beta(self):
+    def get_beta_old(self):
         N, M, B, kappa = self.N, self.M, self.B, self.kappa
         x = sympy.Symbol('x')
         y = x**2*(1-x)/(1+x)**2/(1+x/2)/(1+2*x)**2-4*N*B/M/M*(kappa+2*log(N/M))
+        res = sympy.solveset(y, x, sympy.Interval(0,1))
+        if len(res)==0:
+            print("Inappropriate inputs!")
+            return 0
+        return min(res)
+
+    def get_beta(self):
+        N, M, B, kappa = self.N, self.M, self.B, self.kappa
+        x = sympy.Symbol('x')
+        y = x**2*(1-x)/(1+x)**2/(1+x/2)/(1+2*x)**2-2*N*B/M/M*(kappa+1+2*log(N/M))
         res = sympy.solveset(y, x, sympy.Interval(0,1))
         if len(res)==0:
             print("Inappropriate inputs!")
@@ -104,11 +118,11 @@ if __name__ == '__main__':
 	# params.print_all(20)
 	# N = 9 *16*2**16 # 9437184
 	# M, B, kappa = 16*2**16, 4, 28 # 1048576
-	N = 6000000
-	M, B, kappa = 666667, 6, 28
+	N = 5000000
+	M, B, kappa = 555556, 4, 27.73
 	params = onelevel_oqsort(N, M, B, kappa)
-	alpha = params.get_alpha()
 	beta = params.get_beta()
+	alpha = params.get_alpha(beta)
 	p = params.get_p(beta)
 
 	print("alpha=%.3f,beta=%.3f,p=%d,N=%d,M=%d,B=%d"%(alpha,beta,p,N,M,B))
