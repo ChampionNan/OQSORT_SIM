@@ -56,20 +56,20 @@
 #include <fstream>
 #include <algorithm>
 
-#define N 5000000//10000000
-#define M 1111111 // int type memory restriction
+#define N 10000000//10000000
+#define M 1111112 // int type memory restriction
 #define NUM_STRUCTURES 10
 // #define MEM_IN_ENCLAVE 5
 #define DUMMY 0xffffffff
 #define NULLCHAR '\0'
 // #define B 10
 
-#define ALPHA 0.050
+#define ALPHA 0.025
 #define BETA 0.090
 #define P 11
 
 #define FAN_OUT 2
-#define BLOCK_DATA_SIZE 4
+#define BLOCK_DATA_SIZE 8
 #define BUCKET_SIZE 337//256
 #define MERGE_BATCH_SIZE 20 // merge split hepler
 #define HEAP_NODE_SIZE 20//8192. heap node size
@@ -287,7 +287,7 @@ int main(int argc, const char* argv[]) {
   srand((unsigned)time(NULL));
   
   // 0: OSORT-Tight, 1: OSORT-Loss, 2: bucketOSort, 3: bitonicSort
-  int sortId = 0;
+  int sortId = 1;
   int inputId = 0;
 
   // step1: init test numbers
@@ -355,8 +355,6 @@ int main(int argc, const char* argv[]) {
     }
   }
   end = std::chrono::high_resolution_clock::now();
-  print(arrayAddr, *resId, *resN);
-
   // step4: std::cout execution time
   duration = std::chrono::duration_cast<std::chrono::seconds>(end - start);
   std::cout << "Finished. Duration Time: " << duration.count() << " seconds" << std::endl;
@@ -364,7 +362,7 @@ int main(int argc, const char* argv[]) {
   std::cout << "Sample Cost: " << sampleCost << std::endl;
   std::cout << "Partition Cost: " << partitionCost << std::endl;
   std::cout << "Final Cost: " << finalCost << std::endl;
-
+  // print(arrayAddr, *resId, *resN);
   // step5: exix part
   exit:
     
@@ -714,7 +712,7 @@ std::pair<int, int> MultiLevelPartitionT(int inStructureId, int *samples, int sa
   }
   freeAllocate(outStructureId1, outStructureId1, boundary1 * smallSectionSize * p0);
   
-  int Rsize = 0;  // all input number, using for check
+  // int Rsize = 0;  // all input number, using for check
   int k, Msize1, Msize2;
   int blocks_done = 0;
   int total_blocks = (int)ceil(1.0 * N / BLOCK_DATA_SIZE);
@@ -729,7 +727,6 @@ std::pair<int, int> MultiLevelPartitionT(int inStructureId, int *samples, int sa
       }
       Msize1 = std::min(BLOCK_DATA_SIZE, N - k * BLOCK_DATA_SIZE);
       opOneLinearScanBlock(k * BLOCK_DATA_SIZE, &trustedM3[j * BLOCK_DATA_SIZE], Msize1, inStructureId, 0);
-      Rsize += Msize1;
       memset(shuffleB, DUMMY, sizeof(int) * BLOCK_DATA_SIZE);
       Msize2 = std::min(BLOCK_DATA_SIZE, N - (total_blocks-1-blocks_done) * BLOCK_DATA_SIZE);
       opOneLinearScanBlock((total_blocks-1-blocks_done) * BLOCK_DATA_SIZE, shuffleB, Msize2, inStructureId, 0);
@@ -756,9 +753,6 @@ std::pair<int, int> MultiLevelPartitionT(int inStructureId, int *samples, int sa
     memset(trustedM3, DUMMY, sizeof(int) * boundary2 * BLOCK_DATA_SIZE);
   }
   
-  if (Rsize != N) {
-    std::cout << "MultiLevel data process error!\n";
-  }
   // 7. pad dummy
   for (int j = 0; j < p0; ++j) {
     for (int i = 0; i < boundary1; ++i) {
@@ -815,7 +809,7 @@ std::pair<int, int> MultiLevelPartitionL(int inStructureId, int sampleId, int sa
   }
   freeAllocate(outStructureId1, outStructureId1, boundary1 * smallSectionSize * p0);
   
-  int Rsize = 0;  // all input number, using for check
+  // int Rsize = 0;  // all input number, using for check
   int k, Msize1, Msize2;
   int blocks_done = 0;
   int total_blocks = (int)ceil(1.0 * N / BLOCK_DATA_SIZE);
@@ -830,7 +824,6 @@ std::pair<int, int> MultiLevelPartitionL(int inStructureId, int sampleId, int sa
       }
       Msize1 = std::min(BLOCK_DATA_SIZE, N - k * BLOCK_DATA_SIZE);
       opOneLinearScanBlock(k * BLOCK_DATA_SIZE, &trustedM3[j * BLOCK_DATA_SIZE], Msize1, inStructureId, 0);
-      Rsize += Msize1;
       memset(shuffleB, DUMMY, sizeof(int) * BLOCK_DATA_SIZE);
       Msize2 = std::min(BLOCK_DATA_SIZE, N - (total_blocks-1-blocks_done) * BLOCK_DATA_SIZE);
       opOneLinearScanBlock((total_blocks-1-blocks_done) * BLOCK_DATA_SIZE, shuffleB, Msize2, inStructureId, 0);
@@ -857,9 +850,6 @@ std::pair<int, int> MultiLevelPartitionL(int inStructureId, int sampleId, int sa
     memset(trustedM3, DUMMY, sizeof(int) * boundary2 * BLOCK_DATA_SIZE);
   }
   
-  if (Rsize != N) {
-    std::cout << "MultiLevel data process error!\n";
-  }
   // 7. pad dummy
   // std::cout << "Before padding: \n";
   // print(arrayAddr, outStructureId1, boundary1 * smallSectionSize * p0);
@@ -1539,7 +1529,7 @@ void test(int **arrayAddr, int structureId, int size) {
   // print(structureId);
   if(structureSize[structureId] == 4) {
     for (i = 1; i < size; i++) {
-      pass &= ((arrayAddr[structureId])[i-1] <= (arrayAddr[structureId])[i]);
+      pass &= ((arrayAddr[structureId])[i-1] < (arrayAddr[structureId])[i]);
       if ((arrayAddr[structureId])[i] == 0) {
         pass = 0;
         break;
@@ -1547,7 +1537,7 @@ void test(int **arrayAddr, int structureId, int size) {
     }
   } else if (structureSize[structureId] == 8) {
     for (i = 1; i < size; i++) {
-      pass &= (((Bucket_x*)arrayAddr[structureId])[i-1].x <= ((Bucket_x*)arrayAddr[structureId])[i].x);
+      pass &= (((Bucket_x*)arrayAddr[structureId])[i-1].x < ((Bucket_x*)arrayAddr[structureId])[i].x);
       if (((Bucket_x*)arrayAddr[structureId])[i].x == 0) {
         pass = 0;
         break;
@@ -1581,7 +1571,7 @@ void testWithDummy(int **arrayAddr, int structureId, int size) {
         printf(" TEST PASSed\n");
         return;
       }
-      if ((arrayAddr[structureId])[i] <= (arrayAddr[structureId])[j]) {
+      if ((arrayAddr[structureId])[i] < (arrayAddr[structureId])[j]) {
         i = j;
       } else {
         printf(" TEST FAILed\n");
@@ -1610,7 +1600,7 @@ void testWithDummy(int **arrayAddr, int structureId, int size) {
         printf(" TEST PASSed\n");
         return;
       }
-      if (((Bucket_x*)arrayAddr[structureId])[i].x <= ((Bucket_x*)arrayAddr[structureId])[j].x) {
+      if (((Bucket_x*)arrayAddr[structureId])[i].x < ((Bucket_x*)arrayAddr[structureId])[j].x) {
         i = j;
       } else {
         printf(" TEST FAILed\n");
