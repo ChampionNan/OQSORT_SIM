@@ -111,6 +111,8 @@ class onelevel_oqsort:
         beta = self.get_beta()
         return 5+5*M/N+6*beta+6/B
 
+def calNB(Cost, N, B):
+	return Cost/N*B
 
 if __name__ == '__main__':
 	# params = oqsort(400, 4, 0.2)
@@ -126,7 +128,11 @@ if __name__ == '__main__':
 	p = params.get_p(beta)
 
 	print("alpha=%.3f,beta=%.3f,p=%d,N=%d,M=%d,B=%d"%(alpha,beta,p,N,M,B))
-
+	'''
+	N, B = 10000000, 8
+	Cost = 3055558
+	print(calNB(Cost, N, B))
+	'''
         
 
 
