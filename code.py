@@ -120,8 +120,8 @@ if __name__ == '__main__':
 	# params.print_all(20)
 	# N = 9 *16*2**16 # 9437184
 	# M, B, kappa = 16*2**16, 4, 28 # 1048576
-	N = 671088640
-	M, B, kappa = 33554432, 8, 27.73
+	N = 5000000
+	M, B, kappa = 555556, 4, 27.8
 	params = onelevel_oqsort(N, M, B, kappa)
 	beta = params.get_beta()
 	alpha = params.get_alpha(beta)
