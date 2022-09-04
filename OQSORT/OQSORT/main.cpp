@@ -30,11 +30,11 @@
 #define NULLCHAR '\0'
 #define MY_RAND_MAX 2147483647
 
-#define ALPHA 0.016
-#define BETA 0.020
+#define ALPHA 0.033
+#define BETA 0.014
 #define P 21
 
-#define BLOCK_DATA_SIZE 8
+#define BLOCK_DATA_SIZE 4
 
 // OCALL
 void ocall_print_string(const char *str);
@@ -316,7 +316,7 @@ int SampleTight(int inStructureId, int samplesId, int *trustedM2) {
   
   quickSort(trustedM2, 0, realNum - 1);
   double nonDummyNum = ALPHA * N;
-  std::cout << realNum << ", " << nonDummyNum << std::endl;
+  printf("%d, %f\n", realNum, nonDummyNum);
   free(trustedM1);
   sampleFlag = 0;
   return realNum;
@@ -361,7 +361,7 @@ int SampleLoose(int inStructureId, int samplesId, int *trustedM2) {
   }
   quickSort(trustedM2, 0, realNum - 1);
   double nonDummyNum = ALPHA * N;
-  std::cout << realNum << ", " << nonDummyNum << std::endl;
+  printf("%d, %f\n", realNum, nonDummyNum);
   free(trustedMemory);
   sampleFlag = 0;
   return realNum;
@@ -372,6 +372,7 @@ int* quantileCal(int *samples, int start, int end, int p) {
   int sampleSize = end - start;
   // use samples[0, p] to store pivots
   for (int i = 1; i < p; i++) {
+    // std::cout << "Sample index: " << i * sampleSize / p << std::endl;
     samples[i] = samples[i * sampleSize / p];
   }
   samples[0] = INT_MIN;
