@@ -2,15 +2,14 @@
 import random
 import math
 import time
-
 import sympy
+from scipy.stats import hypergeom
 
 
 class SortBase:
     """
     OCALLS & SUPPORT
     """
-
     def __init__(self, N, M, B):
         # params
         self.N, self.M = N, M
@@ -85,13 +84,7 @@ class SortBase:
     def init(self, structureId, size):
         for i in range(size):
             self.data[structureId].append(size - i)
-
-        for i in range(size - 1, 0, -1):
-            rdIdx = random.randint(0, i - 1)
-            self.data[structureId][i], self.data[structureId][rdIdx] = self.data[structureId][rdIdx], \
-                                                                       self.data[structureId][i]
-    def print(self, structureId):
-        print(self.data[structureId])
+        random.shuffle(self.data[structureId])
 
     def test(self, structureId, size):
         passFlag = True
@@ -126,47 +119,18 @@ class SortBase:
         return
 
 
-class Quick(SortBase):
-    """
-    implementation of quicksort
-    """
-
-    def __init__(self, N, M, B):
-        super(SortBase, self).__init__(N, M, B)
-
-    def partition(self, arr, low, high):
-        randNum = random.randint(low, high)
-        arr[high], arr[randNum] = arr[randNum], arr[high]
-        pivot = arr[high]
-        i = low - 1
-        for j in range(low, high):
-            if pivot > arr[j]:
-                i += 1
-                if i != j:
-                    arr[i], arr[j] = arr[j], arr[i]
-        if i + 1 != high:
-            arr[i + 1], arr[high] = arr[high], arr[i + 1]
-        return i + 1
-
-    def quickSort(self, arr, low, high):
-        if high > low:
-            mid = self.partition(arr, low, high)
-            self.quickSort(arr, low, mid - 1)
-            self.quickSort(arr, mid + 1, high)
-
-
-class OQSORT(Quick):
+class OQSORT(SortBase):
     """
     implementation of OQSORT
     """
-
     def __init__(self, N, M, B, structureId, paddedSize):
-        super(Quick, self).__init__(N, M, B)
+        super(OQSORT, self).__init__(N, M, B)
         self.structureId = structureId
         self.paddedSize = paddedSize
         self.resId = -1
         self.resN = -1
         self.sortId = -1
+        self.is_tight = -1
         # TODO: OQSORT params
         self.ALPHA, self.BETA, self.P, self.IdealCost = -1, -1, -1, -1
 
@@ -189,6 +153,7 @@ class OQSORT(Quick):
             cost = 6 + 6 * beta + alpha * self.B
         self.ALPHA, self.BETA, self.P, self.IdealCost = alpha, beta, p, cost
         self.sortId = not is_tight
+        self.is_tight = is_tight
 
     # TODO: Two sets of alpha, beta, p
     def twolevel(self, is_tight, kappa=27.8):
@@ -210,6 +175,7 @@ class OQSORT(Quick):
             cost = 8 + (6 + self.B) * alpha + 10 * beta
         self.ALPHA, self.BETA, self.P, self.IdealCost = alpha, beta, p, cost
         self.sortId = not is_tight
+        self.is_tight = is_tight
 
     def call(self):
         """
@@ -248,64 +214,33 @@ class OQSORT(Quick):
             N -= 1
         return m
 
-    def shuffle(self, array, n):
-        if n > 1:
-            for i in range(n - 1, 0, -1):
-                j = random.randint(0, i)
-                array[i], array[j] = array[j], array[i]
-
-    def SampleTight(self, inStructureId, trustedM2):
+    def Sample(self, inStructureId, trustedM2, is_tight):
         self.sampleFlag = 1
         N_prime = self.N
-        n_prime = self.ALPHA * self.N
-        M2 = self.B
-        boundary = math.ceil(self.N / M2)
+        n_prime = math.ceil(self.ALPHA * self.N)
+        boundary = math.ceil(self.N / self.B)
         realNum = 0
         readStart = 0
         trustedM1 = []
 
         for i in range(boundary):
-            Msize = min(M2, self.N - i * M2)
-            # TODO: no update about trustedM1?
-            trustedM1 = self.opOneLinearScanBlock(readStart, trustedM1, Msize, inStructureId, 0)
-            readStart += Msize
-            m = self.Hypergeometric(N_prime, Msize, n_prime)
-            self.shuffle(trustedM1, Msize)
-            trustedM2.extend(trustedM1[0:m + 1])
-            realNum += m
-            N_prime -= Msize
-            n_prime -= m
-            if n_prime <= 0:
-                break
-
-        self.quickSort(trustedM2, 0, realNum - 1)
-        print(str(realNum) + ', ' + str(self.ALPHA * self.N))
-        self.sampleFlag = 0
-        return realNum
-
-    def SampleLoose(self, inStructureId, trustedM2):
-        self.sampleFlag = 1
-        N_prime = self.N
-        n_prime = self.ALPHA * self.N
-        boundary = math.ceil(self.N / self.B)
-        realNum = 0
-        readStart = 0
-        trustedMemory = []
-
-        for i in range(boundary):
             Msize = min(self.B, self.N - i * self.B)
             m = self.Hypergeometric(N_prime, Msize, n_prime)
-            if m > 0:
-                realNum += m
-                trustedMemory = self.opOneLinearScanBlock(readStart, trustedMemory, Msize, inStructureId, 0)
+            # m = (int)(hypergeom.rvs(N_prime, n_prime, Msize, size=1)[0])
+            if (not is_tight) and m <= 0:
+                continue
+            else:
+                trustedM1 = self.opOneLinearScanBlock(readStart, trustedM1, Msize, inStructureId, 0)
                 readStart += Msize
-                self.shuffle(trustedMemory, Msize)
-                trustedM2.extend(trustedMemory[0:m + 1])
-                n_prime -= Msize
+                random.shuffle(trustedM1)
+                trustedM2.extend(trustedM1[0:m + 1])
+                realNum += m
+                n_prime -= m
                 if n_prime <= 0:
                     break
+            N_prime -= Msize
 
-        self.quickSort(trustedM2, 0, realNum - 1)
+        trustedM2.sort()
         print(str(realNum) + ', ' + str(self.ALPHA * self.N))
         self.sampleFlag = 0
         return realNum
@@ -382,7 +317,8 @@ class OQSORT(Quick):
                 if blocks_done == total_blocks:
                     break
             blockNum = self.moveDummy(trustedM3, dataBoundary)
-            self.quickSort(trustedM3, 0, blockNum - 1)
+            trustedM3_part = sorted(trustedM3[0:blockNum])
+            trustedM3[0:blockNum] = trustedM3_part
 
             for j in range(p0):
                 pivot1, pivot2 = trustedM1[j], trustedM1[j + 1]
@@ -412,14 +348,14 @@ class OQSORT(Quick):
         if inSize <= self.M:
             trustedM = []
             trustedM = self.opOneLinearScanBlock(0, trustedM, inSize, inStructureId, 0)
-            self.quickSort(trustedM, 0, inSize - 1)
+            trustedM.sort()
             self.data[outStructureId1] = [self.DUMMY] * inSize
             self.opOneLinearScanBlock(0, trustedM, inSize, outStructureId1, 1)
             return outStructureId1
 
         trustedM2 = []
         print("In SampleTight")
-        realNum = self.SampleTight(inStructureId, trustedM2)
+        realNum = self.Sample(inStructureId, trustedM2, self.is_tight)
         print("In OneLevelPartition")
         sectionSize, sectionNum = self.OneLevelPartition(inStructureId, trustedM2, realNum, self.P, outStructureId1)
         self.data[outStructureId2] = [self.DUMMY] * inSize
@@ -430,7 +366,8 @@ class OQSORT(Quick):
         for i in range(sectionNum):
             trustedM = self.opOneLinearScanBlock(i * sectionSize, trustedM, sectionSize, outStructureId1, 0)
             k = self.moveDummy(trustedM, sectionSize)
-            self.quickSort(trustedM, 0, k - 1)
+            trustedM_part = sorted(trustedM[0:k])
+            trustedM[0:k] = trustedM_part
             self.opOneLinearScanBlock(j, trustedM, k, outStructureId2, 1)
             j += k
 
@@ -442,13 +379,13 @@ class OQSORT(Quick):
         if inSize <= self.M:
             trustedM = []
             trustedM = self.opOneLinearScanBlock(0, trustedM, inSize, inStructureId, 0)
-            self.quickSort(trustedM, 0, inSize - 1)
+            trustedM.sort()
             self.opOneLinearScanBlock(0, trustedM, inSize, outStructureId1, 1)
             return outStructureId1, inSize
 
         trustedM2 = []
         print("In SampleLoose")
-        realNum = self.SampleLoose(inStructureId, trustedM2)
+        realNum = self.Sample(inStructureId, trustedM2, self.is_tight)
         print("In OneLevelPartition")
         sectionSize, sectionNum = self.OneLevelPartition(inStructureId, trustedM2, realNum, self.P, outStructureId1)
         totalLevelSize = sectionSize * sectionNum
@@ -459,7 +396,8 @@ class OQSORT(Quick):
         for i in range(sectionNum):
             trustedM = self.opOneLinearScanBlock(i * sectionSize, trustedM, sectionSize, outStructureId1, 0)
             k = self.moveDummy(trustedM, sectionSize)
-            self.quickSort(trustedM, 0, k - 1)
+            trustedM_part = sorted(trustedM[0:k])
+            trustedM[0:k] = trustedM_part
             self.opOneLinearScanBlock(i * sectionSize, trustedM, sectionSize, outStructureId2, 1)
 
         self.finalFlag = 0
@@ -470,7 +408,7 @@ if __name__ == '__main__':
     N, M, B = 5000000, 555556, 4
     sortCase1 = OQSORT(N, M, B, 0, N)
     # is_tight flag
-    sortCase1.onelevel(0)
+    sortCase1.onelevel(1)
     sortCase1.init(0, N)
     print("Start running...")
     sortCase1.call()
