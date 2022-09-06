@@ -136,7 +136,7 @@ int main(int argc, const char* argv[]) {
   srand((unsigned)time(NULL));
   
   // 0: OSORT-Tight, 1: OSORT-Loose, 2: bucketOSort, 3: bitonicSort
-  int sortId = 0;
+  int sortId = 1;
   int inputId = 0;
 
   // step1: init test numbers
@@ -435,6 +435,8 @@ std::pair<int, int> MultiLevelPartition(int inStructureId, int *samples, int sam
     std::cout << "Quantile calculate error!\n";
     trustedM1 = quantileCal(samples, 0, sampleSize, p0);
   }
+  // print(samples, 100);
+  // print(trustedM1, p0+1);
   // 4. allocate trusted memory
   int boundary1 = (int)ceil(1.0 * N / M_prime);
   int boundary2 = (int)ceil(1.0 * M_prime / BLOCK_DATA_SIZE);

@@ -224,27 +224,18 @@ class OQSORT(SortBase):
         trustedM1 = []
 
         for i in range(boundary):
-            if self.sampleCost != i:
-                print(i, self.sampleCost)
             Msize = min(self.B, self.N - i * self.B)
             m = self.Hypergeometric(N_prime, Msize, n_prime)
-            # m = (int)(hypergeom.rvs(N_prime, n_prime, Msize, size=1)[0])
-            if (not is_tight) and m <= 0:
-                print("Error")
-                continue
-            else:
+            # m = hypergeom.rvs(N_prime, n_prime, Msize, size=1)[0]
+            if is_tight or (not is_tight and m > 0):
                 trustedM1 = self.opOneLinearScanBlock(readStart, trustedM1, Msize, inStructureId, 0)
                 readStart += Msize
                 random.shuffle(trustedM1)
-                trustedM2.extend(trustedM1[0:m + 1])
+                trustedM2.extend(trustedM1[0:m])
                 realNum += m
                 n_prime -= m
-                if n_prime <= 0:
-                    break
             N_prime -= Msize
 
-        # TODO: ? why sampleIOcost wrong, use c++ type compare
-        print(self.sampleCost, boundary)
         trustedM2.sort()
         print(str(realNum) + ', ' + str(self.ALPHA * self.N))
         self.sampleFlag = 0
@@ -334,7 +325,7 @@ class OQSORT(SortBase):
                                           outStructureId1, 1)
                 bucketNum[j][i] += wNum
                 if bucketNum[j][i] > smallSectionSize:
-                    print("Overflow in small section M/2p0: " + str(bucketNum[j][i]))
+                    print("Overflow in small section M/p0: " + str(bucketNum[j][i]))
             trustedM3 = [self.DUMMY] * (boundary2 * self.B)
 
         for i in range(p0):
@@ -413,7 +404,7 @@ if __name__ == '__main__':
     N, M, B = 5000000, 555556, 4
     sortCase1 = OQSORT(N, M, B, 0, N)
     # is_tight flag
-    sortCase1.onelevel(1)
+    sortCase1.onelevel(0)
     sortCase1.init(0, N)
     print("Start running...")
     sortCase1.call()
