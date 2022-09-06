@@ -22,17 +22,17 @@
 #include <algorithm>
 #include <iomanip>
 
-#define N 671088640//10000000
-#define M 33554432 // int type memory restriction
+#define N 5000000//10000000
+#define M 555556 // int type memory restriction
 #define NUM_STRUCTURES 10
 // #define MEM_IN_ENCLAVE 5
 #define DUMMY 0xffffffff
 #define NULLCHAR '\0'
 #define MY_RAND_MAX 2147483647
 
-#define ALPHA 0.033
-#define BETA 0.014
-#define P 21
+#define ALPHA 0.049991
+#define BETA 0.090581
+#define P 11
 
 #define BLOCK_DATA_SIZE 4
 
@@ -309,11 +309,12 @@ int SampleTight(int inStructureId, int samplesId, int *trustedM2) {
     realNum += m;
     N_prime -= Msize;
     n_prime -= m;
+    // TODO: ERROR!
     if (n_prime <= 0) {
       break;
     }
   }
-  
+  std::cout << boundary << ", " << sampleCost << std::endl;
   quickSort(trustedM2, 0, realNum - 1);
   double nonDummyNum = ALPHA * N;
   printf("%d, %f\n", realNum, nonDummyNum);

@@ -205,13 +205,13 @@ class OQSORT(SortBase):
                 f.write('\n')
         f.close()
 
-    def Hypergeometric(self, N, M, n):
+    def Hypergeometric(self, NN, Msize, n_prime):
         m = 0
-        for j in range(M):
-            if random.random() < n / M:
+        for j in range(Msize):
+            if random.random() < n_prime / NN:
                 m += 1
-                n -= 1
-            N -= 1
+                n_prime -= 1
+            NN -= 1
         return m
 
     def Sample(self, inStructureId, trustedM2, is_tight):
@@ -224,10 +224,13 @@ class OQSORT(SortBase):
         trustedM1 = []
 
         for i in range(boundary):
+            if self.sampleCost != i:
+                print(i, self.sampleCost)
             Msize = min(self.B, self.N - i * self.B)
             m = self.Hypergeometric(N_prime, Msize, n_prime)
             # m = (int)(hypergeom.rvs(N_prime, n_prime, Msize, size=1)[0])
             if (not is_tight) and m <= 0:
+                print("Error")
                 continue
             else:
                 trustedM1 = self.opOneLinearScanBlock(readStart, trustedM1, Msize, inStructureId, 0)
@@ -240,6 +243,8 @@ class OQSORT(SortBase):
                     break
             N_prime -= Msize
 
+        # TODO: ? why sampleIOcost wrong, use c++ type compare
+        print(self.sampleCost, boundary)
         trustedM2.sort()
         print(str(realNum) + ', ' + str(self.ALPHA * self.N))
         self.sampleFlag = 0
