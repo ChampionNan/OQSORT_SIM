@@ -230,8 +230,9 @@ class OQSORT(SortBase):
             if is_tight or (not is_tight and m > 0):
                 trustedM1 = self.opOneLinearScanBlock(readStart, trustedM1, Msize, inStructureId, 0)
                 readStart += Msize
-                random.shuffle(trustedM1)
-                trustedM2.extend(trustedM1[0:m])
+                # random.shuffle(trustedM1)
+                # trustedM2.extend(trustedM1[0:m])
+                trustedM2.extend(random.sample(trustedM1, m))
                 realNum += m
                 n_prime -= m
             N_prime -= Msize
@@ -404,7 +405,7 @@ if __name__ == '__main__':
     N, M, B = 5000000, 555556, 4
     sortCase1 = OQSORT(N, M, B, 0, N)
     # is_tight flag
-    sortCase1.onelevel(0)
+    sortCase1.onelevel(1)
     sortCase1.init(0, N)
     print("Start running...")
     sortCase1.call()
