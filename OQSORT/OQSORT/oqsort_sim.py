@@ -182,7 +182,6 @@ class OQSORT(SortBase):
         Method to Call OQSORT
         :return:
         """
-        start = time.time()
         if not self.sortId:
             self.resId = self.ObliviousTightSort(self.structureId, self.paddedSize, self.structureId + 1,
                                                  self.structureId + 2)
@@ -191,8 +190,7 @@ class OQSORT(SortBase):
             self.resId, self.resN = self.ObliviousLooseSort(self.structureId, self.paddedSize, self.structureId + 1,
                                                             self.structureId + 2)
             self.testWithDummy(self.resId, self.resN)
-        end = time.time()
-        print("Execution time: " + str(end - start))
+
         print("Total Cost, Sample Cost, Partition Cost, Final Cost: ")
         print(str(self.IOcost / self.N * self.B) + str(', ') +
               str(self.sampleCost / self.N * self.B) + str(', ') +
@@ -342,6 +340,7 @@ class OQSORT(SortBase):
 
     def ObliviousTightSort(self, inStructureId, inSize, outStructureId1, outStructureId2):
         print("In ObliviousTightSort")
+        start = time.time()
         if inSize <= self.M:
             trustedM = []
             trustedM = self.opOneLinearScanBlock(0, trustedM, inSize, inStructureId, 0)
@@ -352,14 +351,19 @@ class OQSORT(SortBase):
 
         trustedM2 = []
         print("In SampleTight")
+        start1 = time.time()
         realNum = self.Sample(inStructureId, trustedM2, self.is_tight)
+        end1 = time.time()
         print("In OneLevelPartition")
+        start2 = time.time()
         sectionSize, sectionNum = self.OneLevelPartition(inStructureId, trustedM2, realNum, self.P, outStructureId1)
+        end2 = time.time()
         self.data[outStructureId2] = [self.DUMMY] * inSize
         trustedM = []
         j = 0
         self.finalFlag = 1
         print("In final")
+        start3 = time.time()
         for i in range(sectionNum):
             trustedM = self.opOneLinearScanBlock(i * sectionSize, trustedM, sectionSize, outStructureId1, 0)
             k = self.moveDummy(trustedM, sectionSize)
@@ -367,12 +371,16 @@ class OQSORT(SortBase):
             trustedM[0:k] = trustedM_part
             self.opOneLinearScanBlock(j, trustedM, k, outStructureId2, 1)
             j += k
-
+        end3 = time.time()
+        end = time.time()
         self.finalFlag = 0
+        print("Total: " + str(end - start) + "Sample: " + str(end1 - start1) + "Partition: " + str(
+            end2 - start2) + "Final: " + str(end3 - start3))
         return outStructureId2
 
     def ObliviousLooseSort(self, inStructureId, inSize, outStructureId1, outStructureId2):
         print("In ObliviousLooseSort")
+        start = time.time()
         if inSize <= self.M:
             trustedM = []
             trustedM = self.opOneLinearScanBlock(0, trustedM, inSize, inStructureId, 0)
@@ -382,22 +390,30 @@ class OQSORT(SortBase):
 
         trustedM2 = []
         print("In SampleLoose")
+        start1 = time.time()
         realNum = self.Sample(inStructureId, trustedM2, self.is_tight)
+        end1 = time.time()
         print("In OneLevelPartition")
+        start2 = time.time()
         sectionSize, sectionNum = self.OneLevelPartition(inStructureId, trustedM2, realNum, self.P, outStructureId1)
+        end2 = time.time()
         totalLevelSize = sectionSize * sectionNum
         self.data[outStructureId2] = [self.DUMMY] * totalLevelSize
         trustedM = []
         self.finalFlag = 1
         print("In final")
+        start3 = time.time()
         for i in range(sectionNum):
             trustedM = self.opOneLinearScanBlock(i * sectionSize, trustedM, sectionSize, outStructureId1, 0)
             k = self.moveDummy(trustedM, sectionSize)
             trustedM_part = sorted(trustedM[0:k])
             trustedM[0:k] = trustedM_part
             self.opOneLinearScanBlock(i * sectionSize, trustedM, sectionSize, outStructureId2, 1)
-
+        end3 = time.time()
+        end = time.time()
         self.finalFlag = 0
+        print("Total: " + str(end-start) + ", Sample: " + str(end1-start1) + ", Partition: " + str(end2-start2) +
+              ", Final: " + str(end3-start3))
         return outStructureId2, totalLevelSize
 
 
@@ -405,7 +421,7 @@ if __name__ == '__main__':
     N, M, B = 5000000, 555556, 4
     sortCase1 = OQSORT(N, M, B, 0, N)
     # is_tight flag
-    sortCase1.onelevel(1)
+    sortCase1.onelevel(0)
     sortCase1.init(0, N)
     print("Start running...")
     sortCase1.call()
