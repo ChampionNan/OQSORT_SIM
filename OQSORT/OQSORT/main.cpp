@@ -22,17 +22,17 @@
 #include <algorithm>
 #include <iomanip>
 
-#define N 5000000//10000000
-#define M 555556 // int type memory restriction
+#define N 671088640//10000000
+#define M 33554432 // int type memory restriction
 #define NUM_STRUCTURES 10
 // #define MEM_IN_ENCLAVE 5
 #define DUMMY 0xffffffff
 #define NULLCHAR '\0'
 #define MY_RAND_MAX 2147483647
 
-#define ALPHA 0.049991
-#define BETA 0.090581
-#define P 11
+#define ALPHA 0.033224
+#define BETA 0.013546
+#define P 21
 
 #define BLOCK_DATA_SIZE 4
 

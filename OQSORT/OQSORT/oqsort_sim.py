@@ -15,8 +15,8 @@ class SortBase:
         self.N, self.M = N, M
         self.B = B
         self.DUMMY = 0xffffffff
-        # data lists
-        self.data = [[], [], []]
+        # inStructureId, sampleId, outStructureId1, outStructureId2
+        self.data = [[], [], [], []]
         # IO cost counting
         self.IOcost = 0
         self.sampleFlag, self.sampleCost = 0, 0
@@ -133,6 +133,8 @@ class OQSORT(SortBase):
         self.is_tight = -1
         # TODO: OQSORT params
         self.ALPHA, self.BETA, self.P, self.IdealCost = -1, -1, -1, -1
+        # used for 2 level, 2nd sample params
+        self._alpha, self._beta, self._p, self._cost, self._is_tight = -1, -1, -1, -1, -1
 
     def onelevel(self, is_tight, kappa=27.8):
         x = sympy.Symbol('x')
@@ -191,8 +193,36 @@ class OQSORT(SortBase):
                                                             self.structureId + 2)
             self.testWithDummy(self.resId, self.resN)
 
-        print("Total Cost, Sample Cost, Partition Cost, Final Cost: ")
-        print(str(self.IOcost / self.N * self.B) + str(', ') +
+        print("Ideal Cost, Actual Cost, Sample Cost, Partition Cost, Final Cost: ")
+        print(str(self.IdealCost / self.N * self.B) + str(', ') +
+              str(self.IOcost / self.N * self.B) + str(', ') +
+              str(self.sampleCost / self.N * self.B) + str(', ') +
+              str(self.partitionCost / self.N * self.B) + str(', ') +
+              str(self.finalCost / self.N * self.B) + str(', '))
+        f = open("/Users/apple/Desktop/Lab/ALLSORT/ALLSORT/OQSORT/OQSORT/outputpy.txt", "w")
+        for idx, num in enumerate(self.data[self.resId]):
+            f.write(str(num) + str(' '))
+            if not (idx % 10):
+                f.write('\n')
+        f.close()
+
+    def call2(self):
+        """
+        Method to Call Two-Level OQSORT
+        :return:
+        """
+        if not self.sortId:
+            self.resId = self.ObliviousTightSort2(self.structureId, self.paddedSize, self.structureId + 1,
+                                                 self.structureId + 2)
+            self.test(self.resId, self.paddedSize)
+        else:
+            self.resId, self.resN = self.ObliviousLooseSort2(self.structureId, self.paddedSize, self.structureId + 1,
+                                                            self.structureId + 2)
+            self.testWithDummy(self.resId, self.resN)
+
+        print("Ideal Cost, Actual Cost, Sample Cost, Partition Cost, Final Cost: ")
+        print(str(self.IdealCost / self.N * self.B) + str(', ') +
+              str(self.IOcost / self.N * self.B) + str(', ') +
               str(self.sampleCost / self.N * self.B) + str(', ') +
               str(self.partitionCost / self.N * self.B) + str(', ') +
               str(self.finalCost / self.N * self.B) + str(', '))
@@ -239,6 +269,13 @@ class OQSORT(SortBase):
         print(str(realNum) + ', ' + str(self.ALPHA * self.N))
         self.sampleFlag = 0
         return realNum
+
+    def SampleRec(self, inStructureId, is_tight, sampleId):
+        """
+        Finish sample recursive selection
+        """
+        pass
+
 
     def quantileCal(self, samples, start, end, p):
         sampleSize = end - start
@@ -338,6 +375,13 @@ class OQSORT(SortBase):
 
         return bucketSize0, p0
 
+    def TwoLevelPartition(self, inStructureId, pivots, p, outStructureId1, outStructureId2):
+        """
+        Finish two level partition
+        pivots: List[]
+        Return: bucket size & #pivots
+        """
+
     def ObliviousTightSort(self, inStructureId, inSize, outStructureId1, outStructureId2):
         print("In ObliviousTightSort")
         start = time.time()
@@ -378,6 +422,24 @@ class OQSORT(SortBase):
             end2 - start2) + "Final: " + str(end3 - start3))
         return outStructureId2
 
+    def ObliviousTightSort2(self, inStructureId, inSize, sampleId, outStructureId1, outStructureId2):
+        """
+        Implement two level oqsort
+        """
+        pivots = self.SampleRec(inStructureId, self.is_tight, sampleId)
+        sectionSize, sectionNum = self.TwoLevelPartition(inStructureId, pivots, self.P, outStructureId1, outStructureId2)
+        # outStructureId1 will be the final output
+        trustedM = []
+        j = 0
+        for i in range(sectionNum):
+            trustedM = self.opOneLinearScanBlock(i * sectionSize, trustedM, sectionSize, outStructureId2, 0)
+            k = self.moveDummy(trustedM, sectionSize)
+            trustedM_part = sorted(trustedM[0:k])
+            trustedM[0:k] = trustedM_part
+            self.opOneLinearScanBlock(j, trustedM, k, outStructureId1, 1)
+            j += k
+        return outStructureId1
+
     def ObliviousLooseSort(self, inStructureId, inSize, outStructureId1, outStructureId2):
         print("In ObliviousLooseSort")
         start = time.time()
@@ -416,13 +478,46 @@ class OQSORT(SortBase):
               ", Final: " + str(end3-start3))
         return outStructureId2, totalLevelSize
 
+    def ObliviousLooseSort2(self, inStructureId, inSize, sampleId, outStructureId1, outStructureId2):
+        """
+        Implement two level oqsort
+        """
+        pivots = self.SampleRec(inStructureId, self.is_tight, sampleId)
+        sectionSize, sectionNum = self.TwoLevelPartition(inStructureId, pivots, self.P, outStructureId1, outStructureId2)
+        totalLevelSize = sectionSize * sectionNum
+        self.data[outStructureId1] = [self.DUMMY] * totalLevelSize
+
+        for i in range(sectionNum):
+            trustedM = self.opOneLinearScanBlock(i * sectionSize, trustedM, sectionSize, outStructureId2, 0)
+            k = self.moveDummy(trustedM, sectionSize)
+            trustedM_part = sorted(trustedM[0:k])
+            trustedM[0:k] = trustedM_part
+            self.opOneLinearScanBlock(i * sectionSize, trustedM, sectionSize, outStructureId1, 1)
+
+        return outStructureId1, totalLevelSize
+
+    def ObliviousLooseSortRec(self, sampleId, inSize, sortedSampleId):
+        """
+        called in SampleRec
+        Inner sample func, use _alpha etc params
+        Return: Selected Pivots: List
+        """
+
 
 if __name__ == '__main__':
-    N, M, B = 5000000, 555556, 4
-    sortCase1 = OQSORT(N, M, B, 0, N)
-    # is_tight flag
-    sortCase1.onelevel(0)
+    N, M, B, is_tight = 671088640, 33554432, 4, 1
+    sortCase1 = OQSORT(N, M, B, is_tight, N)
     sortCase1.init(0, N)
-    print("Start running...")
-    sortCase1.call()
-    print("Finished.")
+    if N / M < 100:
+        # is_tight flag
+        sortCase1.onelevel(is_tight)
+        print("Start running...")
+        sortCase1.call()
+        print("Finished.")
+    else:
+        # TODO: 2 level execution
+        sortCase1.twolevel(is_tight)
+
+        pass
+
+
