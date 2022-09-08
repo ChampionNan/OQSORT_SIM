@@ -127,7 +127,7 @@ if __name__ == '__main__':
 	alpha = params.get_alpha(beta)
 	p = params.get_p(beta)
 
-	print("alpha=%f,beta=%f,p=%d,N=%d,M=%d,B=%d"%(alpha,beta,p,N,M,B))
+	print("alpha=%.3f,beta=%f,p=%d,N=%d,M=%d,B=%d"%(alpha,beta,p,N,M,B))
 	'''
 	N, B = 10000000, 8
 	Cost = 3055558

@@ -19,49 +19,25 @@ class SortBase:
         self.data = [[], [], [], []]
         # IO cost counting
         self.IOcost = 0
-        self.sampleFlag, self.sampleCost = 0, 0
-        self.partitionFlag, self.partitionCost = 0, 0
-        self.finalFlag, self.finalCost = 0, 0
 
     def OcallReadBlock(self, index, blockSize, structureId):
-        if not blockSize:
-            return []
-        ret = self.data[structureId][index:index + blockSize]
-        self.IOcost += 1
-        if self.sampleFlag:
-            self.sampleCost += 1
-        if self.partitionFlag:
-            self.partitionCost += 1
-        if self.finalFlag:
-            self.finalCost += 1
+        ret = self.data[structureId][index:index+blockSize]
+        self.IOcost += math.ceil(blockSize/self.B)
         return ret
 
     def OcallWriteBlock(self, index, buffer, blockSize, structureId):
-        if not blockSize:
-            return []
-        self.data[structureId][index:index + blockSize] = buffer
-        self.IOcost += 1
-        if self.sampleFlag:
-            self.sampleCost += 1
-        if self.partitionFlag:
-            self.partitionCost += 1
-        if self.finalFlag:
-            self.finalCost += 1
+        self.data[structureId][index:index+blockSize] = buffer
+        self.IOcost += math.ceil(blockSize/self.B)
 
     # TODO: check all this function calling
-    def opOneLinearScanBlock(self, index, block, blockSize, structureId, write=0):
-        boundary = (blockSize + self.B - 1) // self.B
+    def opOneLinearScanBlock(self, index, block, blockSize, structureId, write=0, dummyNum=0):
+        if not (blockSize + dummyNum):
+            return []
         if not write:
-            total = []
-            for i in range(boundary):
-                Msize = min(self.B, blockSize - i * self.B)
-                part = self.OcallReadBlock(index + i * self.B, Msize, structureId)
-                total.extend(part)
+            total = self.OcallReadBlock(index, blockSize, structureId)
             return total
         else:
-            for i in range(boundary):
-                Msize = min(self.B, blockSize - i * self.B)
-                self.OcallWriteBlock(index + i * self.B, block[i * self.B:i * self.B + Msize], Msize, structureId)
+            self.OcallWriteBlock(index, block + [self.DUMMY] * dummyNum, blockSize + dummyNum, structureId)
 
     def padWithDummy(self, structureId, start, realNum, secSize):
         lenth = secSize - realNum
@@ -128,13 +104,15 @@ class OQSORT(SortBase):
         self.structureId = structureId
         self.paddedSize = paddedSize
         self.resId = -1
-        self.resN = -1
+        self.resN = self.N
         self.sortId = -1
         self.is_tight = -1
         # TODO: OQSORT params
         self.ALPHA, self.BETA, self.P, self.IdealCost = -1, -1, -1, -1
         # used for 2 level, 2nd sample params
         self._alpha, self._beta, self._p, self._cost, self._is_tight = -1, -1, -1, -1, -1
+        # Memory Load partition index array
+        self.partitionIdx = []
 
     def onelevel(self, is_tight, kappa=27.8):
         x = sympy.Symbol('x')
@@ -193,17 +171,12 @@ class OQSORT(SortBase):
                                                             self.structureId + 2)
             self.testWithDummy(self.resId, self.resN)
 
-        print("Ideal Cost, Actual Cost, Sample Cost, Partition Cost, Final Cost: ")
-        print(str(self.IdealCost / self.N * self.B) + str(', ') +
-              str(self.IOcost / self.N * self.B) + str(', ') +
-              str(self.sampleCost / self.N * self.B) + str(', ') +
-              str(self.partitionCost / self.N * self.B) + str(', ') +
-              str(self.finalCost / self.N * self.B) + str(', '))
         f = open("/Users/apple/Desktop/Lab/ALLSORT/ALLSORT/OQSORT/OQSORT/outputpy.txt", "w")
-        for idx, num in enumerate(self.data[self.resId]):
-            f.write(str(num) + str(' '))
+        for idx in range(self.resN):
+            f.write(str(self.data[self.resId][idx]) + str(' '))
             if not (idx % 10):
                 f.write('\n')
+
         f.close()
 
     def call2(self):
@@ -243,7 +216,6 @@ class OQSORT(SortBase):
         return m
 
     def Sample(self, inStructureId, trustedM2, is_tight):
-        self.sampleFlag = 1
         N_prime = self.N
         n_prime = math.ceil(self.ALPHA * self.N)
         boundary = math.ceil(self.N / self.B)
@@ -267,7 +239,6 @@ class OQSORT(SortBase):
 
         trustedM2.sort()
         print(str(realNum) + ', ' + str(self.ALPHA * self.N))
-        self.sampleFlag = 0
         return realNum
 
     def SampleRec(self, inStructureId, is_tight, sampleId):
@@ -285,32 +256,45 @@ class OQSORT(SortBase):
         samples[p] = float('inf')
         return samples[0:p + 1]
 
-    def BSFirstGE(self, array, size, target):
-        left, right = 0, size - 1
-        while left <= right:
-            mid = left + ((right - left) >> 1)
-            if array[mid] < target:
-                left = mid + 1
-            else:
-                right = mid - 1
-        if left >= size:
-            return -1
-        return left
+    def partition(self, arr, low, high, pivot):
+        """
+        Return partition border index
+        """
+        i = low - 1
+        for j in range(low, high+1):
+            if pivot > arr[j]:
+                i += 1
+                arr[i], arr[j] = arr[j], arr[i]
+        return i
 
-    def BSFirstL(self, array, size, target):
-        left, right = 0, size - 1
-        while left <= right:
-            mid = left + ((right - left) >> 1)
-            if array[mid] >= target:
-                right = mid - 1
+    def quickSort(self, arr, low, high, pivots, left, right):
+        """
+        low, high represents pivots' index
+        """
+        # use pivots to judge the end
+        if right >= left:
+            pivotIdx = (left + right) >> 1
+            pivot = pivots[pivotIdx]
+            mid = self.partition(arr, low, high, pivot)
+            self.partitionIdx.append(mid)
+            self.quickSort(arr, low, mid, pivots, left, pivotIdx - 1)
+            self.quickSort(arr, mid + 1, high, pivots, pivotIdx + 1, right)
+
+    def checkSection(self, trustedM1, trustedM3):
+        passFlag = False
+        for j in range(len(self.partitionIdx)-2):
+            index1, index2, index3 = self.partitionIdx[j], self.partitionIdx[j+1], self.partitionIdx[j+2]
+            max1, min1 = max(trustedM3[index1+1:index2+1]), min(trustedM3[index1+1:index2+1])
+            max2, min2 = max(trustedM3[index2+1:index3+1]), min(trustedM3[index2+1:index3+1])
+            # print(str(trustedM1[j]) + ', ' + str(trustedM1[j+1]))
+            if min1 >= trustedM1[j] and max1 < trustedM1[j + 1] <= min2 and max2 < trustedM1[j + 2] and max1 < min2:
+                passFlag = True
             else:
-                left = mid + 1
-        if right < 0:
-            return -1
-        return right
+                passFlag = False
+                break
+        print(passFlag)
 
     def OneLevelPartition(self, inStructureId, samples, sampleSize, p, outStructureId1):
-        self.partitionFlag = 1
         if self.N <= self.M:
             return self.N, 1
         hatN = math.ceil((1 + 2 * self.BETA) * self.N)
@@ -324,10 +308,8 @@ class OQSORT(SortBase):
         # TODO: floor operation
         smallSectionSize = self.M // p0
         bucketSize0 = boundary1 * smallSectionSize
-        bucketNum = [[0 for i in range(boundary1)] for j in range(p0)]
         # TODO: check initial list operations
         self.data[outStructureId1] = [self.DUMMY] * (boundary1 * smallSectionSize * p0)
-
         blocks_done = 0
         total_blocks = math.ceil(self.N / self.B)
         k = -1
@@ -349,29 +331,25 @@ class OQSORT(SortBase):
                 if blocks_done == total_blocks:
                     break
             blockNum = self.moveDummy(trustedM3, dataBoundary)
-            trustedM3_part = sorted(trustedM3[0:blockNum])
-            trustedM3[0:blockNum] = trustedM3_part
-
+            # TODO: check new quick sort, especially border params
+            self.quickSort(trustedM3, 0, blockNum-1, trustedM1, 1, p0)
+            # TODO: check is we need remove duplicate indexes
+            self.partitionIdx.sort()
+            self.partitionIdx.insert(0, -1)
+            # self.checkSection(trustedM1, trustedM3)
+            # self.partitionIdx.append(blockNum-1)
             for j in range(p0):
-                pivot1, pivot2 = trustedM1[j], trustedM1[j + 1]
-                index1 = self.BSFirstGE(trustedM3, blockNum, pivot1)
-                index2 = self.BSFirstL(trustedM3, blockNum, pivot2)
-                wNum = index2 - index1 + 1
-                self.opOneLinearScanBlock(j * bucketSize0 + i * smallSectionSize, trustedM3[index1:index2 + 1], wNum,
-                                          outStructureId1, 1)
-                bucketNum[j][i] += wNum
-                if bucketNum[j][i] > smallSectionSize:
-                    print("Overflow in small section M/p0: " + str(bucketNum[j][i]))
+                index1, index2 = self.partitionIdx[j]+1, self.partitionIdx[j+1]
+                writeBackNum = index2 - index1 + 1
+                if writeBackNum > smallSectionSize:
+                    print("Overflow in small section M/p0: " + str(writeBackNum))
+                self.opOneLinearScanBlock(j * bucketSize0 + i * smallSectionSize, trustedM3[index1:index2+1],
+                                          writeBackNum, outStructureId1, 1, smallSectionSize - writeBackNum)
             trustedM3 = [self.DUMMY] * (boundary2 * self.B)
-
-        for i in range(p0):
-            for j in range(boundary1):
-                self.padWithDummy(outStructureId1, j * bucketSize0 + i * smallSectionSize, bucketNum[j][i],
-                                  smallSectionSize)
+            self.partitionIdx.clear()
 
         if bucketSize0 > self.M:
             print("Each section size is greater than M, adjust parameters: " + str(bucketSize0))
-        self.partitionFlag = 0
 
         return bucketSize0, p0
 
@@ -398,14 +376,15 @@ class OQSORT(SortBase):
         start1 = time.time()
         realNum = self.Sample(inStructureId, trustedM2, self.is_tight)
         end1 = time.time()
+        print("Till Sample IOcost: " + str(self.IOcost / self.N * self.B))
         print("In OneLevelPartition")
         start2 = time.time()
         sectionSize, sectionNum = self.OneLevelPartition(inStructureId, trustedM2, realNum, self.P, outStructureId1)
         end2 = time.time()
+        print("Till Partition IOcost: " + str(self.IOcost / self.N * self.B))
         self.data[outStructureId2] = [self.DUMMY] * inSize
         trustedM = []
         j = 0
-        self.finalFlag = 1
         print("In final")
         start3 = time.time()
         for i in range(sectionNum):
@@ -417,9 +396,8 @@ class OQSORT(SortBase):
             j += k
         end3 = time.time()
         end = time.time()
-        self.finalFlag = 0
-        print("Total: " + str(end - start) + "Sample: " + str(end1 - start1) + "Partition: " + str(
-            end2 - start2) + "Final: " + str(end3 - start3))
+        print("Till Final IOcost: " + str(self.IOcost / self.N * self.B))
+        print("Total=%.3f,Sample=%.3f,Partition=%.3f,Final=%.3f" % (end-start, end1-start1, end2-start2, end3-start3))
         return outStructureId2
 
     def ObliviousTightSort2(self, inStructureId, inSize, sampleId, outStructureId1, outStructureId2):
@@ -455,14 +433,15 @@ class OQSORT(SortBase):
         start1 = time.time()
         realNum = self.Sample(inStructureId, trustedM2, self.is_tight)
         end1 = time.time()
+        print("Till Sample IOcost: " + str(self.IOcost / self.N * self.B))
         print("In OneLevelPartition")
         start2 = time.time()
         sectionSize, sectionNum = self.OneLevelPartition(inStructureId, trustedM2, realNum, self.P, outStructureId1)
         end2 = time.time()
+        print("Till Partition IOcost: " + str(self.IOcost / self.N * self.B))
         totalLevelSize = sectionSize * sectionNum
         self.data[outStructureId2] = [self.DUMMY] * totalLevelSize
         trustedM = []
-        self.finalFlag = 1
         print("In final")
         start3 = time.time()
         for i in range(sectionNum):
@@ -473,9 +452,9 @@ class OQSORT(SortBase):
             self.opOneLinearScanBlock(i * sectionSize, trustedM, sectionSize, outStructureId2, 1)
         end3 = time.time()
         end = time.time()
-        self.finalFlag = 0
-        print("Total: " + str(end-start) + ", Sample: " + str(end1-start1) + ", Partition: " + str(end2-start2) +
-              ", Final: " + str(end3-start3))
+        print("Till Final IOcost: " + str(self.IOcost / self.N * self.B))
+        print("Total=%.3f,Sample=%.3f,Partition=%.3f,Final=%.3f" % (
+        end - start, end1 - start1, end2 - start2, end3 - start3))
         return outStructureId2, totalLevelSize
 
     def ObliviousLooseSort2(self, inStructureId, inSize, sampleId, outStructureId1, outStructureId2):
@@ -505,8 +484,8 @@ class OQSORT(SortBase):
 
 
 if __name__ == '__main__':
-    N, M, B, is_tight = 671088640, 33554432, 4, 1
-    sortCase1 = OQSORT(N, M, B, is_tight, N)
+    N, M, B, is_tight = 5000000, 555556, 4, 0
+    sortCase1 = OQSORT(N, M, B, 0, N)
     sortCase1.init(0, N)
     if N / M < 100:
         # is_tight flag
@@ -517,7 +496,9 @@ if __name__ == '__main__':
     else:
         # TODO: 2 level execution
         sortCase1.twolevel(is_tight)
-
+        print("Start running...")
+        sortCase1.call2()
+        print("Finished.")
         pass
 
 
