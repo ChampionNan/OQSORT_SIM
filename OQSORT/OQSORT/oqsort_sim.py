@@ -215,9 +215,10 @@ class OQSORT(SortBase):
             NN -= 1
         return m
 
-    def Sample(self, inStructureId, trustedM2, is_tight):
+    def Sample(self, inStructureId, trustedM2, is_tight, is_rec=0):
         N_prime = self.N
-        n_prime = math.ceil(self.ALPHA * self.N)
+        alpha = self.ALPHA if not is_rec else self._alpha
+        n_prime = math.ceil(alpha * self.N)
         boundary = math.ceil(self.N / self.B)
         realNum = 0
         readStart = 0
@@ -238,15 +239,39 @@ class OQSORT(SortBase):
             N_prime -= Msize
 
         trustedM2.sort()
-        print(str(realNum) + ', ' + str(self.ALPHA * self.N))
+        print(str(realNum) + ', ' + str(alpha * self.N))
         return realNum
 
-    def SampleRec(self, inStructureId, is_tight, sampleId):
+    def SampleRecT(self, inStructureId, is_tight, sampleId):
         """
         Finish sample recursive selection
         """
-        pass
+        N_prime = N
+        n_prime = math.ceil(self.ALPHA * self.N)
+        boundary = math.ceil(self.N / self.M)
+        realNum = 0
+        readStart = 0
+        writeBackstart = 0
+        trustedM1 = []
 
+        for i in range(boundary):
+            Msize = min(self.M, self.N - i * self.M)
+            alphaM22 = math.ceil(2 * self.ALPHA * Msize)
+            trustedM1 = self.opOneLinearScanBlock(readStart, trustedM1, Msize, inStructureId, 0)
+            readStart += Msize
+            m = self.Hypergeometric(N_prime, Msize, n_prime)
+            realNum += m
+            random.shuffle(trustedM1)
+            trustedM1[m:Msize] = [self.DUMMY] * (Msize - m)
+            self.opOneLinearScanBlock(writeBackstsrt, trustedM1[0:alphaM22], alphaM22, sampleId, 1)
+            writeBackstart += alphaM22
+            N_prime -= Msize
+            n_prime -= m
+            if n_prime <= 0:
+                break
+        # TODO: contains DUMMY
+        if writeBackstart > self.M:
+            pivots = ObliviousLooseSortRec(sampleId, writeBackstart, )
 
     def quantileCal(self, samples, start, end, p):
         sampleSize = end - start
@@ -314,12 +339,15 @@ class OQSORT(SortBase):
         total_blocks = math.ceil(self.N / self.B)
         k = -1
         trustedM3 = [self.DUMMY] * (boundary2 * self.B)
+        total_time = 0
         for i in range(boundary1):
             for j in range(boundary2):
+                s = time.time()
                 if not (total_blocks - 1 - blocks_done):
                     k = 0
                 else:
-                    k = random.randint(0, total_blocks - 2 - blocks_done)
+                    k = random.randrange(0, total_blocks - blocks_done)
+
                 # print("k: " + str(k))
                 Msize1 = min(self.B, self.N - k * self.B)
                 trustedM3[j*self.B:j*self.B + Msize1] = self.opOneLinearScanBlock(k * self.B, [], Msize1, inStructureId, 0)
@@ -330,6 +358,8 @@ class OQSORT(SortBase):
                 blocks_done += 1
                 if blocks_done == total_blocks:
                     break
+                e = time.time()
+                total_time += e - s
             blockNum = self.moveDummy(trustedM3, dataBoundary)
             # TODO: check new quick sort, especially border params
             self.quickSort(trustedM3, 0, blockNum-1, trustedM1, 1, p0)
@@ -350,7 +380,7 @@ class OQSORT(SortBase):
 
         if bucketSize0 > self.M:
             print("Each section size is greater than M, adjust parameters: " + str(bucketSize0))
-
+        print("Random total time: " + str(total_time))
         return bucketSize0, p0
 
     def TwoLevelPartition(self, inStructureId, pivots, p, outStructureId1, outStructureId2):
@@ -477,10 +507,15 @@ class OQSORT(SortBase):
 
     def ObliviousLooseSortRec(self, sampleId, inSize, sortedSampleId):
         """
-        called in SampleRec
+        called in SampleRec, sampleId inSize number having DUMMY
+        sortedSampleId: store outputs after partition
         Inner sample func, use _alpha etc params
         Return: Selected Pivots: List
         """
+        trustedM2 = []
+        # TODO: ERROR sampleId numbers having DUMMY elements? How to fix
+        realNum = self.Sample(sampleId, trustedM2, 0, 1)
+        sectionSize, sectionNum = self.OneLevelPartition(sampleId, trustedM2, realNum, )
 
 
 if __name__ == '__main__':
@@ -499,6 +534,5 @@ if __name__ == '__main__':
         print("Start running...")
         sortCase1.call2()
         print("Finished.")
-        pass
 
 
