@@ -359,20 +359,21 @@ class OQSORT(SortBase):
         k = -1
         trustedM3 = [self.DUMMY] * (boundary2 * self.B)
         total_time = 0
+        s = time.time()
         for i in range(boundary1):
             for j in range(boundary2):
-                s = time.time()
+                # Random Read Block Start
                 if not (total_blocks - 1 - blocks_done):
                     k = 0
                 else:
                     k = random.randrange(0, total_blocks - blocks_done)
-
-                # print("k: " + str(k))
                 Msize1 = min(self.B, self.N - k * self.B)
                 trustedM3[j*self.B:j*self.B + Msize1] = self.opOneLinearScanBlock(k * self.B, [], Msize1, inStructureId, 0)
                 shuffleB = [self.DUMMY] * self.B
                 Msize2 = min(self.B, self.N - (total_blocks - 1 - blocks_done) * self.B)
                 shuffleB[0:Msize2] = self.opOneLinearScanBlock((total_blocks - 1 - blocks_done) * self.B, [], Msize2, inStructureId, 0)
+                # Random Read Block End
+                '''
                 self.opOneLinearScanBlock(k * self.B, shuffleB, self.B, inStructureId, 1)
                 blocks_done += 1
                 if blocks_done == total_blocks:
@@ -396,7 +397,9 @@ class OQSORT(SortBase):
                                           writeBackNum, outStructureId1, 1, smallSectionSize - writeBackNum)
             trustedM3 = [self.DUMMY] * (boundary2 * self.B)
             self.partitionIdx.clear()
-
+        '''
+        e = time.time()
+        print("Time: " + str(e - s))
         if bucketSize0 > self.M:
             print("Each section size is greater than M, adjust parameters: " + str(bucketSize0))
         print("Random total time: " + str(total_time))
