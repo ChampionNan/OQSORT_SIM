@@ -1,4 +1,4 @@
-# import numpy as np
+import numpy as np
 import random
 import math
 import time
@@ -215,32 +215,51 @@ class OQSORT(SortBase):
             NN -= 1
         return m
 
+    def floydSampler(self, n, k):
+        H = set()
+        x = np.arange(n-k, n)
+        for i in range(k):
+            r = random.randint(0, n-k+1+i)
+            if r in H:
+                j = random.randint(0, i)
+                x[i], x[j] = x[j], x[i]
+                H.add(n-k+i)
+            else:
+                x[i] = r
+                H.add(r)
+        x.sort()
+        return x
+
     def Sample(self, inStructureId, trustedM2, is_tight, is_rec=0):
         N_prime = self.N
         alpha = self.ALPHA if not is_rec else self._alpha
         n_prime = math.ceil(alpha * self.N)
         boundary = math.ceil(self.N / self.B)
-        realNum = 0
-        readStart = 0
+        j = 0  # sampleIdx index
         trustedM1 = []
+        sampleIdx = self.floydSampler(N_prime, n_prime)
 
         for i in range(boundary):
-            Msize = min(self.B, self.N - i * self.B)
-            m = self.Hypergeometric(N_prime, Msize, n_prime)
-            # m = hypergeom.rvs(N_prime, n_prime, Msize, size=1)[0]
-            if is_tight or (not is_tight and m > 0):
-                trustedM1 = self.opOneLinearScanBlock(readStart, trustedM1, Msize, inStructureId, 0)
-                readStart += Msize
-                # random.shuffle(trustedM1)
-                # trustedM2.extend(trustedM1[0:m])
-                trustedM2.extend(random.sample(trustedM1, m))
-                realNum += m
-                n_prime -= m
-            N_prime -= Msize
+            if is_tight:
+                trustedM1 = self.opOneLinearScanBlock(i * self.B, trustedM1, min(self.B, self.N - i * self.B),
+                                                      inStructureId, 0)
+                while j < n_prime and (sampleIdx[j] >= i * self.B) and (sampleIdx[j] < (i+1) * self.B):
+                    trustedM2.append(trustedM1[sampleIdx[j] % self.B])
+                    j += 1
+            elif (not is_tight) and (sampleIdx[j] >= i * self.B) and (sampleIdx[j] < (i+1) * self.B):
+                trustedM1 = self.opOneLinearScanBlock(i * self.B, trustedM1, min(self.B, self.N - i * self.B),
+                                                      inStructureId, 0)
+                while (sampleIdx[j] >= i * self.B) and (sampleIdx[j] < (i+1) * self.B):
+                    trustedM2.append(trustedM1[sampleIdx[j] % self.B])
+                    j += 1
+                    if j >= n_prime:
+                        break
+                if j >= n_prime:
+                        break
 
         trustedM2.sort()
-        print(str(realNum) + ', ' + str(alpha * self.N))
-        return realNum
+        # print(trustedM2)
+        return n_prime
 
     def SampleRecT(self, inStructureId, is_tight, sampleId):
         """
@@ -519,7 +538,7 @@ class OQSORT(SortBase):
 
 
 if __name__ == '__main__':
-    N, M, B, is_tight = 5000000, 555556, 4, 0
+    N, M, B, is_tight = 5000000, 555556, 4, 1
     sortCase1 = OQSORT(N, M, B, 0, N)
     sortCase1.init(0, N)
     if N / M < 100:
