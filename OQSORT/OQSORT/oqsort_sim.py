@@ -408,7 +408,7 @@ class OQSORT(SortBase):
 
     # todo: ccd
     # FIXME: cdc
-    def TwoLevelPartition(self, inStructureId, pivots, sampleSize, p, outStructureId1, outSructureId2):
+    def TwoLevelPartition(self, inStructureId, pivots, sampleSize, p, outStructureId1, outStructureId2):
         """
         Finish two level partition
         pivots: List[]
@@ -637,7 +637,7 @@ class OQSORT(SortBase):
         print("Calculating Pivots")
         for i in range(self.P):
             # Actual Index in samples
-            index = [i * size + j * size // self.P for j in range(1, p)]
+            index = [i * size + j * size // self.P for j in range(1, self.P)]
             index.insert(0, float('-inf'))
             index.append(float('inf'))
             quantileIdx2.append(index)
