@@ -1,4 +1,5 @@
 from tracemalloc import start
+from Crypto.Cipher import AES
 import numpy as np
 import random
 import math
@@ -94,6 +95,43 @@ class SortBase:
                 print("TEST Failed")
         return
 
+class FFSEM:
+    """
+    Paper: Feistel Finite Set Encryption Mode
+    """
+    def __init__(self, key: bytes, max_num: int, rounds: int = 6):
+        self.cipher = AES.new(key, AES.MODE_ECB)
+        self._base = math.ceil(math.log2(max_num) / 2)
+        self.max_num = 1 << 2*self._base
+        if self.max_num != max_num:
+            print("Permuted range is: " + str(self.max_num))
+        self.rounds = rounds
+    
+    def prf(self, a: int) -> int:
+        b = a.to_bytes(self.cipher.block_size, byteorder='big', signed=False)
+        return int.from_bytes(self.cipher.encrypt(b), byteorder='big', signed=False)
+
+    def encrypt(self, a: int) -> int:
+        if a >= self.max_num:
+            raise ValueError(f'Value must be less than {self.max_num}')
+
+        l, r = divmod(a, 1 << self._base)
+        for i in range(1, self.rounds+1):
+            b = (r << self.cipher.block_size * 8 - self._base) + i
+            e = self.prf(b)
+            l, r = r, l ^ (e >> self.cipher.block_size * 8 - self._base)
+        return (l << self._base) + r
+
+    def decrypt(self, a: int) -> int:
+        if a >= self.max_num:
+            raise ValueError(f'Value must be less than {self.max_num}')
+        
+        l, r = divmod(a, 1 << self._base)
+        for i in range(self.rounds, 0, -1):
+            b = (l << self.cipher.block_size * 8 - self._base) + i
+            e = self.prf(b)
+            r, l = l, r ^ (e >> self.cipher.block_size * 8 - self._base)
+        return (l << self._base) + r
 
 class OQSORT(SortBase):
     """
@@ -172,7 +210,7 @@ class OQSORT(SortBase):
             self.resId, self.resN = self.ObliviousLooseSort(self.structureId, self.paddedSize, self.structureId + 1, self.structureId + 2)
             self.testWithDummy(self.resId, self.resN)
 
-        f = open("/Users/apple/Desktop/Lab/ALLSORT/ALLSORT/OQSORT/OQSORT/outputpy.txt", "w")
+        f = open("/homes/bchenba/OQSORT/out.txt", "w")
         for idx in range(self.resN):
             f.write(str(self.data[self.resId][idx]) + str(' '))
             if not (idx % 10):
@@ -333,9 +371,21 @@ class OQSORT(SortBase):
                 break
         print(passFlag)
 
+    def calNextValidIndex(codec, k, index_range, total_blocks):
+        if k == index_range:
+            return -1, -1
+        read_index = codec.encrypt(k)
+        while read_index >= total_blocks:
+            k += 1
+            if k == index_range:
+                return -1, -1
+            read_index = codec.encrypt(k)  
+        return k, read_index
+
     def OneLevelPartition(self, inStructureId, inSize, samples, sampleSize, p, outStructureId1):
         if inSize <= self.M:
             return self.N, 1
+        # TODO: change self.N
         hatN = math.ceil((1 + 2 * self.BETA) * self.N)
         M_prime = math.ceil(self.M / (1 + 2 * self.BETA))
         r = math.ceil(math.log(hatN / self.M) / math.log(p))
@@ -349,27 +399,29 @@ class OQSORT(SortBase):
         bucketSize0 = boundary1 * smallSectionSize
         # TODO: check initial list operations
         self.data[outStructureId1] = [self.DUMMY] * (boundary1 * smallSectionSize * p0)
+        trustedM3 = [self.DUMMY] * (boundary2 * self.B)
+        # Set up for pseudorandom permutation
         blocks_done = 0
         total_blocks = math.ceil(self.N / self.B)
-        k = -1
-        trustedM3 = [self.DUMMY] * (boundary2 * self.B)
+        key = b'1Level Partition'
+        codec = FFSEM(key, max_num=total_blocks)
+        index_range = codec.max_num
+        k = 0
         s = time.time()
         for i in range(boundary1):
             for j in range(boundary2):
-                # Random Read Block Start
-                if not (total_blocks - 1 - blocks_done):
-                    k = 0
-                else:
-                    k = random.randrange(0, total_blocks - blocks_done)
-                Msize1 = min(self.B, self.N - k * self.B)
-                trustedM3[j*self.B:j*self.B + Msize1] = self.opOneLinearScanBlock(k * self.B, [], Msize1, inStructureId, 0)
-                shuffleB = [self.DUMMY] * self.B
-                Msize2 = min(self.B, self.N - (total_blocks - 1 - blocks_done) * self.B)
-                shuffleB[0:Msize2] = self.opOneLinearScanBlock((total_blocks - 1 - blocks_done) * self.B, [], Msize2, inStructureId, 0)
-                # Random Read Block End
-                self.opOneLinearScanBlock(k * self.B, shuffleB, self.B, inStructureId, 1)
-                blocks_done += 1
-                if blocks_done == total_blocks:
+                read_index = codec.encrypt(k)
+                while read_index >= total_blocks:
+                    k += 1
+                    if k == index_range:
+                        k = -1
+                    read_index = codec.encrypt(k)  
+                if k == -1: # Read finish
+                    break
+                Msize1 = min(self.B, self.N - read_index * self.B)
+                trustedM3[j*self.B:j*self.B + Msize1] = self.opOneLinearScanBlock(read_index * self.B, [], Msize1, inStructureId, 0)
+                k += 1
+                if k == index_range: # Read finish
                     break
             blockNum = self.moveDummy(trustedM3, dataBoundary)
             # TODO: check new quick sort, especially border params
@@ -386,6 +438,8 @@ class OQSORT(SortBase):
                 self.opOneLinearScanBlock(j * bucketSize0 + i * smallSectionSize, trustedM3[index1:index2+1], writeBackNum, outStructureId1, 1, smallSectionSize - writeBackNum)
             trustedM3 = [self.DUMMY] * (boundary2 * self.B)
             self.partitionIdx.clear()
+            if k == index_range: # Read finish
+                break
         e = time.time()
         print("Time: " + str(e - s))
         if bucketSize0 > self.M:
@@ -619,6 +673,7 @@ class OQSORT(SortBase):
         Inner sample func, use _alpha etc params
         Return: Selected Pivots: List
         """
+        # TODO: FIX different input size error
         print("In ObliviousLooseSortRec")
         trustedM2 = []
         print("In Sample's Sample")
@@ -674,7 +729,8 @@ class OQSORT(SortBase):
 
 if __name__ == '__main__':
     # M=32MB 4194304
-    N, M, B, is_tight = 200000000, 2000000, 3, 0
+    # N, M, B, is_tight = 200000000, 2000000, 3, 0
+    N, M, B, is_tight = 5000000, 555556, 4, 1 
     sortCase1 = OQSORT(N, M, B, 0, N)
     if N / M < 100:
         # is_tight flag
