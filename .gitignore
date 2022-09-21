@@ -3,3 +3,5 @@ diff.cpp
 *.txt
 OQSORT/OQSORT.xcodeproj/**
 OQSORT/.idea/**
+input*
+output*

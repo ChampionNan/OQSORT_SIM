@@ -1,0 +1,3 @@
+[submodule "OQSORT_SIM_SERVER"]
+	path = OQSORT_SIM_SERVER
+	url = https://github.com/ChampionNan/OQSORT_SIM_SERVER
