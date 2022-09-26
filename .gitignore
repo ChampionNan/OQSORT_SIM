@@ -5,3 +5,4 @@ OQSORT/OQSORT.xcodeproj/**
 OQSORT/.idea/**
 input*
 output*
+.DS_Store
