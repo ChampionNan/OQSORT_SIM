@@ -6,3 +6,6 @@ OQSORT/.idea/**
 input*
 output*
 .DS_Store
+.*
+OQSORT/.*
+OQSORT/OQSORT/.*

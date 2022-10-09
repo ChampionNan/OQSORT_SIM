@@ -23,13 +23,14 @@
 #include <iomanip>
 // TODO: new
 #include <unordered_set>
+#include <unordered_map>
 #include <bitset>
 // #include "/usr/local/Cellar/mbedtls/3.1.0/include/mbedtls/aes.h"
 // #include "boost/math/distributions/hypergeometric.hpp"
 
 
-#define N 2000000//10000000
-#define M 500000 // int type memory restriction
+#define N 10000000//10000000
+#define M 1000000 // int type memory restriction
 #define BLOCK_DATA_SIZE 4
 #define NUM_STRUCTURES 10
 // #define MEM_IN_ENCLAVE 5
@@ -40,9 +41,9 @@
 #define _ALPHA -1
 #define _BETA -1
 #define _P -1
-#define ALPHA 0.134742
-#define BETA 0.054864
-#define P 5
+#define ALPHA 0.050486
+#define BETA 0.065487
+#define P 12
 
 // OCALL
 void ocall_print_string(const char *str);
@@ -371,7 +372,41 @@ void quickSortMulti(int *arr, int low, int high, std::vector<int> pivots, int le
   }
 }
 
-std::pair<int, int> OneLevelPartition(int inStructureId, int inSize, std::vector<int> &samples, int sampleSize, int p, int outStructureId1, int is_rec=0) {
+int BSFirstGreaterEqual(std::vector<int> &nums,int target)
+{
+    int left = 0, right = nums.size() - 1, res = right;
+    while(left <= right)
+    {
+        int mid = left + (right - left) / 2 ;
+        if(nums[mid] >= target)
+        {
+            res = mid; right = mid - 1;
+        }else
+        {
+            left = mid + 1;
+        }
+ 
+    }
+    if(target<=nums[res]) return res;
+    return -1;
+}
+
+// Partition num to =target & <target
+// Return the first element index greater than target
+int partitionEqual(int *num, int size, int target) {
+  int i = -1;
+  for (int j = 0; j < size; ++j) {
+    if (num[j] == target) {
+      i++;
+      if (i != j) {
+        swapRow(num+i, num+j);
+      }
+    }
+  }
+  return i;
+}
+
+std::pair<int, int> OneLevelPartition(int inStructureId, int inSize, std::vector<int> &samples, int sampleSize, int p, int outStructureId1, int is_rec=0, int is_duplicate=0) {
   if (inSize <= M) {
     return {inSize, 1};
   }
@@ -386,15 +421,25 @@ std::pair<int, int> OneLevelPartition(int inStructureId, int inSize, std::vector
   int dataBoundary = boundary2 * BLOCK_DATA_SIZE;
   int smallSectionSize = M / p0;
   int bucketSize0 = boundary1 * smallSectionSize;
+  // Memory each section real data num for later duplicate numbers
   freeAllocate(outStructureId1, outStructureId1, boundary1 * smallSectionSize * p0);
-  
-  int k, Msize1, Msize2, index1, index2, writeBackNum;
+  int k, Msize1, Msize2, index1, index2, index3, writeBackNum, equalNum, eachNum;
   int blocks_done = 0;
   int total_blocks = ceil(1.0 * inSize / BLOCK_DATA_SIZE);
   int *trustedM3 = (int*)malloc(sizeof(int) * boundary2 * BLOCK_DATA_SIZE);
   memset(trustedM3, DUMMY, sizeof(int) * boundary2 * BLOCK_DATA_SIZE);
   int *shuffleB = (int*)malloc(sizeof(int) * BLOCK_DATA_SIZE);
   std::vector<int> partitionIdx;
+  std::unordered_map<int, int> dupPivots;
+  // Add pivots map: record #pivots & corresponding elements
+  for (int a = 1; a < p0; ++a) {
+    if (dupPivots.count(samples[a]) > 0) {
+      dupPivots[samples[a]] += 1;
+    } else {
+      dupPivots.insert({samples[a], 1});
+    }
+  }
+  // TODO: count each memory block # duplicate keys, find out why misssing some pivot numbers
   // TODO: Find FFSEM implementation in c++
   for (int i = 0; i < boundary1; ++i) {
     for (int j = 0; j < boundary2; ++j) {
@@ -421,12 +466,40 @@ std::pair<int, int> OneLevelPartition(int inStructureId, int inSize, std::vector
     for (int j = 0; j < p0; ++j) {
       index1 = partitionIdx[j]+1;
       index2 = partitionIdx[j+1];
-      std::cout << trustedM3[index1] << ' ' << trustedM3[index2] << std::endl;
+      // std::cout << trustedM3[index1] << ' ' << trustedM3[index2] << std::endl;
       writeBackNum = index2 - index1 + 1;
-      if (writeBackNum > smallSectionSize) {
-        std::cout << "Overflow in small section M/p0: " << writeBackNum << std::endl;
+      if (writeBackNum == 0) {
+        continue;
       }
-      opOneLinearScanBlock(j * bucketSize0 + i * smallSectionSize, &trustedM3[index1], writeBackNum, outStructureId1, 1, smallSectionSize - writeBackNum);
+      // Find out #elements=pivots=samples[j]
+      equalNum = 0;
+      eachNum = 0;
+      // TODO: partition trustedM3[index1]
+      index3 = partitionEqual(&trustedM3[index1], writeBackNum, samples[j]);
+      if (j != 0 && index3 != -1) {
+        // std::cout << trustedM3[index1+index3] << std::endl;
+        
+        index3 += index1 + 1;
+        equalNum = index3 - index1;
+        int parts = dupPivots[samples[j]];
+        int average = equalNum / parts;
+        int remainder = equalNum % parts;
+        int startJ = BSFirstGreaterEqual(samples, samples[j]);
+        int readM3Idx = 0;
+        for (int m = 0; m < parts; ++m) {
+          eachNum = average + ((m < remainder) ? 1 : 0);
+          if (eachNum > smallSectionSize) {
+            std::cout << "Overflow in small section M/p0: " << eachNum << std::endl;
+          }
+          opOneLinearScanBlock((startJ+m)*bucketSize0+i*smallSectionSize, &trustedM3[index1+readM3Idx], eachNum, outStructureId1, 1, smallSectionSize-eachNum);
+          readM3Idx += eachNum;
+        }
+      }
+      // TODO: Change reading start
+      if (eachNum+writeBackNum-equalNum > smallSectionSize) {
+        std::cout << "Overflow in small section M/p0: " << eachNum+writeBackNum-equalNum << std::endl;
+      }
+      opOneLinearScanBlock(j * bucketSize0 + i * smallSectionSize + eachNum, &trustedM3[index1+equalNum], writeBackNum-equalNum, outStructureId1, 1, smallSectionSize-eachNum-(writeBackNum-equalNum));
     }
     memset(trustedM3, DUMMY, sizeof(int) * boundary2 * BLOCK_DATA_SIZE);
     partitionIdx.clear();
@@ -656,7 +729,7 @@ void ObliviousLooseSortRec(int sampleId, int sampleSize, int sortedSampleId, std
   std::vector<int> trustedM2;
   int realNum = Sample(sampleId, sampleSize, trustedM2, 0, 1);
   std::cout << "In OneLevelPartition\n";
-  std::pair<int, int> section = OneLevelPartition(sampleId, sampleSize, trustedM2, realNum, _P, sortedSampleId, 1);
+  std::pair<int, int> section = OneLevelPartition(sampleId, sampleSize, trustedM2, realNum, _P, sortedSampleId, 1, 0);
   int sectionSize = section.first;
   int sectionNum = section.second;
   int j = 0, k = 0, total = 0;
@@ -896,7 +969,8 @@ void init(int **arrayAddr, int structurId, int size) {
   int i;
   int *addr = (int*)arrayAddr[structurId];
   for (i = 0; i < size; i++) {
-    addr[i] = (size - i);
+    // addr[i] = (size - i);
+    addr[i] = (size - i) / 10000;
   }
   /*
   for(i = size - 1; i >= 1; --i) {
@@ -941,9 +1015,9 @@ void test(int **arrayAddr, int structureId, int size) {
   // print(structureId);
   if(structureSize[structureId] == 4) {
     for (i = 1; i < size; i++) {
-      pass &= ((arrayAddr[structureId])[i-1] < (arrayAddr[structureId])[i]);
-      if ((arrayAddr[structureId])[i] == 0) {
-        pass = 0;
+      pass &= ((arrayAddr[structureId])[i-1] <= (arrayAddr[structureId])[i]);
+      if (!pass) {
+        std::cout << (arrayAddr[structureId])[i-1] << ' ' << (arrayAddr[structureId])[i];
         break;
       }
     }
