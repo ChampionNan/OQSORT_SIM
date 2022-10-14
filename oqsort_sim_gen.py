@@ -743,7 +743,7 @@ class OQSORT(SortBase):
 if __name__ == '__main__':
     # M=32MB 4194304
     # N, M, B, is_tight = 200000000, 2000000, 3, 0
-    N, M, B, is_tight = 2000000, 222222, 4, 1
+    N, M, B, is_tight = 10000000, 1000000, 4, 1
     sortCase1 = OQSORT(N, M, B, 0, N)
     if N / M < 100:
         # is_tight flag

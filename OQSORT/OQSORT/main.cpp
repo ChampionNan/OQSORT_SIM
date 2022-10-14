@@ -29,8 +29,8 @@
 // #include "boost/math/distributions/hypergeometric.hpp"
 
 
-#define N 10000000//10000000
-#define M 1000000 // int type memory restriction
+#define N 335544320//10000000
+#define M 16777216 // int type memory restriction
 #define BLOCK_DATA_SIZE 4
 #define NUM_STRUCTURES 10
 // #define MEM_IN_ENCLAVE 5
@@ -41,9 +41,9 @@
 #define _ALPHA -1
 #define _BETA -1
 #define _P -1
-#define ALPHA 0.050486
-#define BETA 0.065487
-#define P 12
+#define ALPHA 0.0318303755519756
+#define BETA 0.0196472251883635
+#define P 21
 
 // OCALL
 void ocall_print_string(const char *str);
@@ -52,6 +52,8 @@ void OcallWriteBlock(int index, int* buffer, size_t blockSize, int structureId);
 void freeAllocate(int structureIdM, int structureIdF, int size);
 void opOneLinearScanBlock(int index, int* block, size_t blockSize, int structureId, int write, int dummyNum);
 // OQSORT
+
+
 void floydSampler(int n, int k, std::vector<int> &x);
 int Sample(int inStructureId, int sampleSize, std::vector<int> &trustedM2, int is_tight, int is_rec);
 void SampleRec(int inStructureId, int sampleId, int sortedSampleId, int is_tight, std::vector<std::vector<int>>& pivots);
@@ -175,6 +177,7 @@ int main(int argc, const char* argv[]) {
   // step4: std::cout execution time
   duration = std::chrono::duration_cast<std::chrono::seconds>(end - start);
   std::cout << "Finished. Duration Time: " << duration.count() << " seconds" << std::endl;
+  std::cout << "IOcost: " << 1.0 * IOcost / N * BLOCK_DATA_SIZE << std::endl;
   print(arrayAddr, *resId, *resN);
   // step5: exix part
   exit:
@@ -406,6 +409,7 @@ int partitionEqual(int *num, int size, int target) {
   return i;
 }
 
+/*
 std::pair<int, int> OneLevelPartition(int inStructureId, int inSize, std::vector<int> &samples, int sampleSize, int p, int outStructureId1, int is_rec=0, int is_duplicate=0) {
   if (inSize <= M) {
     return {inSize, 1};
@@ -416,6 +420,10 @@ std::pair<int, int> OneLevelPartition(int inStructureId, int inSize, std::vector
   int r = ceil(1.0 * log(hatN / M) / log(p));
   int p0 = ceil(1.0 * hatN / (M * pow(p, r - 1)));
   quantileCal(samples, 0, sampleSize, p0);
+  for (int i = 0; i < samples.size(); ++i) {
+    std::cout << samples[i] << ' ';
+  }
+  std::cout << std::endl;
   int boundary1 = ceil(1.0 * inSize / M_prime);
   int boundary2 = ceil(1.0 * M_prime / BLOCK_DATA_SIZE);
   int dataBoundary = boundary2 * BLOCK_DATA_SIZE;
@@ -489,7 +497,7 @@ std::pair<int, int> OneLevelPartition(int inStructureId, int inSize, std::vector
         for (int m = 0; m < parts; ++m) {
           eachNum = average + ((m < remainder) ? 1 : 0);
           if (eachNum > smallSectionSize) {
-            std::cout << "Overflow in small section M/p0: " << eachNum << std::endl;
+            std::cout << "Overflow in small section1 M/p0: " << eachNum << std::endl;
           }
           opOneLinearScanBlock((startJ+m)*bucketSize0+i*smallSectionSize, &trustedM3[index1+readM3Idx], eachNum, outStructureId1, 1, smallSectionSize-eachNum);
           readM3Idx += eachNum;
@@ -497,7 +505,7 @@ std::pair<int, int> OneLevelPartition(int inStructureId, int inSize, std::vector
       }
       // TODO: Change reading start
       if (eachNum+writeBackNum-equalNum > smallSectionSize) {
-        std::cout << "Overflow in small section M/p0: " << eachNum+writeBackNum-equalNum << std::endl;
+        std::cout << "Overflow in small section2 M/p0: " << eachNum+writeBackNum-equalNum << std::endl;
       }
       opOneLinearScanBlock(j * bucketSize0 + i * smallSectionSize + eachNum, &trustedM3[index1+equalNum], writeBackNum-equalNum, outStructureId1, 1, smallSectionSize-eachNum-(writeBackNum-equalNum));
     }
@@ -510,7 +518,75 @@ std::pair<int, int> OneLevelPartition(int inStructureId, int inSize, std::vector
     std::cout << "Each section size is greater than M, adjst parameters: " << bucketSize0 << ", " << M << std::endl;
   }
   return {bucketSize0, p0};
+}*/
+
+std::pair<int, int> OneLevelPartition(int inStructureId, int inSize, std::vector<int> &samples, int sampleSize, int p, int outStructureId1, int is_rec=0, int is_duplicate=0) {
+  if (inSize <= M) {
+    return {inSize, 1};
+  }
+  double beta = (!is_rec) ? BETA : _BETA;
+  int hatN = ceil(1.0 * (1 + 2 * beta) * inSize);
+  int M_prime = ceil(1.0 * M / (1 + 2 * beta));
+  int r = ceil(1.0 * log(hatN / M) / log(p));
+  int p0 = ceil(1.0 * hatN / (M * pow(p, r - 1)));
+  quantileCal(samples, 0, sampleSize, p0);
+  int boundary1 = ceil(1.0 * inSize / M_prime);
+  int boundary2 = ceil(1.0 * M_prime / BLOCK_DATA_SIZE);
+  int dataBoundary = boundary2 * BLOCK_DATA_SIZE;
+  int smallSectionSize = M / p0;
+  int bucketSize0 = boundary1 * smallSectionSize;
+  freeAllocate(outStructureId1, outStructureId1, boundary1 * smallSectionSize * p0);
+  
+  int k, Msize1, Msize2, index1, index2, writeBackNum;
+  int blocks_done = 0;
+  int total_blocks = ceil(1.0 * inSize / BLOCK_DATA_SIZE);
+  int *trustedM3 = (int*)malloc(sizeof(int) * boundary2 * BLOCK_DATA_SIZE);
+  memset(trustedM3, DUMMY, sizeof(int) * boundary2 * BLOCK_DATA_SIZE);
+  int *shuffleB = (int*)malloc(sizeof(int) * BLOCK_DATA_SIZE);
+  std::vector<int> partitionIdx;
+  // TODO: Find FFSEM implementation in c++
+  for (int i = 0; i < boundary1; ++i) {
+    for (int j = 0; j < boundary2; ++j) {
+      if (total_blocks - 1 - blocks_done == 0) {
+        k = 0;
+      } else {
+        k = rand() % (total_blocks - blocks_done);
+      }
+      Msize1 = std::min(BLOCK_DATA_SIZE, inSize - k * BLOCK_DATA_SIZE);
+      opOneLinearScanBlock(k * BLOCK_DATA_SIZE, &trustedM3[j*BLOCK_DATA_SIZE], Msize1, inStructureId, 0, 0);
+      memset(shuffleB, DUMMY, sizeof(int) * BLOCK_DATA_SIZE);
+      Msize2 = std::min(BLOCK_DATA_SIZE, inSize - (total_blocks-1-blocks_done) * BLOCK_DATA_SIZE);
+      opOneLinearScanBlock((total_blocks-1-blocks_done) * BLOCK_DATA_SIZE, shuffleB, Msize2, inStructureId, 0, 0);
+      opOneLinearScanBlock(k * BLOCK_DATA_SIZE, shuffleB, BLOCK_DATA_SIZE, inStructureId, 1, 0);
+      blocks_done += 1;
+      if (blocks_done == total_blocks) {
+        break;
+      }
+    }
+    int blockNum = moveDummy(trustedM3, dataBoundary);
+    quickSortMulti(trustedM3, 0, blockNum-1, samples, 1, p0, partitionIdx);
+    sort(partitionIdx.begin(), partitionIdx.end());
+    partitionIdx.insert(partitionIdx.begin(), -1);
+    for (int j = 0; j < p0; ++j) {
+      index1 = partitionIdx[j]+1;
+      index2 = partitionIdx[j+1];
+      writeBackNum = index2 - index1 + 1;
+      if (writeBackNum > smallSectionSize) {
+        std::cout << "Overflow in small section M/p0: " << writeBackNum << ',' << smallSectionSize <<std::endl;
+      }
+      opOneLinearScanBlock(j * bucketSize0 + i * smallSectionSize, &trustedM3[index1], writeBackNum, outStructureId1, 1, smallSectionSize - writeBackNum);
+    }
+    memset(trustedM3, DUMMY, sizeof(int) * boundary2 * BLOCK_DATA_SIZE);
+    partitionIdx.clear();
+  }
+  free(trustedM3);
+  free(shuffleB);
+  if (bucketSize0 > M) {
+    std::cout << "Each section size is greater than M, adjst parameters: " << bucketSize0 << ", " << M << std::endl;
+  }
+  return {bucketSize0, p0};
 }
+
 
 
 // TODO: Add TwoLevelPartition
@@ -969,8 +1045,30 @@ void init(int **arrayAddr, int structurId, int size) {
   int i;
   int *addr = (int*)arrayAddr[structurId];
   for (i = 0; i < size; i++) {
-    // addr[i] = (size - i);
-    addr[i] = (size - i) / 10000;
+    addr[i] = (size - i);
+    // addr[i] = (size - i) % 100;
+    /*
+    if (i < 1000000) {
+      addr[i] = 10;
+    } else if (i < 2000000) {
+      addr[i] = 10;
+    } else if (i < 3000000) {
+      addr[i] = 10;
+    } else if (i < 4000000) {
+      addr[i] = 10;
+    } else if (i < 5000000) {
+      addr[i] = 10;
+    } else if (i < 6000000) {
+      addr[i] = 10;
+    } else if (i < 7000000) {
+      addr[i] = 4;
+    } else if (i < 8000000) {
+      addr[i] = 4;
+    } else if (i < 9000000) {
+      addr[i] = 4;
+    } else if (i < 10000000) {
+      addr[i] = 4;
+    }*/
   }
   /*
   for(i = size - 1; i >= 1; --i) {
